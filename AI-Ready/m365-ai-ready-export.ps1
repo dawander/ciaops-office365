@@ -29,8 +29,12 @@ param(
     [string]$TenantId,
     [string]$OutputPath = ".\AIReadiness_$(Get-Date -Format 'yyyyMMdd_HHmmss').json",
     [string]$GraphClientId = '04b07795-8ddb-461a-bbee-02f9e1bf7b46',
+    [string]$PnPClientId,
     [string[]]$GraphScopes,
     [switch]$RequestRequiredGraphScopesUpFront,
+    [switch]$ForceInteractiveTeamsPnPLogin,
+    [switch]$SharePointCollectionChild,
+    [string]$SharePointAdminUrl,
     [switch]$IncludeSampling,
     [switch]$IncludeDiagnostics,
     [switch]$IncludeDetailedData,
@@ -79,160 +83,371 @@ function Resolve-OutputFilePath {
     return $resolvedPath
 }
 
+function Convert-ToPowerShellLiteral {
+    param([Parameter(Mandatory)][object]$Value)
+
+    if ($null -eq $Value) { return '$null' }
+
+    if ($Value -is [string]) {
+        return "'" + ($Value -replace "'", "''") + "'"
+    }
+
+    if ($Value -is [bool] -or $Value -is [switch]) {
+        return (if ([bool]$Value) { '$true' } else { '$false' })
+    }
+
+    return [string]$Value
+}
+
+function Get-CurrentScriptArgumentString {
+    $parts = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($entry in ($PSBoundParameters.GetEnumerator() | Sort-Object Key)) {
+        $key = [string]$entry.Key
+        $value = $entry.Value
+
+        if ($value -is [switch] -or $value -is [bool]) {
+            if ([bool]$value) {
+                $parts.Add("-$key")
+            }
+            continue
+        }
+
+        if ($value -is [System.Array]) {
+            foreach ($item in @($value)) {
+                $parts.Add("-$key")
+                $parts.Add((Convert-ToPowerShellLiteral -Value $item))
+            }
+            continue
+        }
+
+        $parts.Add("-$key")
+        $parts.Add((Convert-ToPowerShellLiteral -Value $value))
+    }
+
+    return ($parts -join ' ')
+}
+
+function Get-CleanRelaunchCommand {
+    $scriptPathLiteral = Convert-ToPowerShellLiteral -Value $PSCommandPath
+    $argsText = Get-CurrentScriptArgumentString
+    $cmd = "pwsh -NoProfile -NoLogo -ExecutionPolicy Bypass -File $scriptPathLiteral"
+    if (-not [string]::IsNullOrWhiteSpace($argsText)) {
+        $cmd = "$cmd $argsText"
+    }
+    return $cmd
+}
+
+function Get-SharePointAdminUrl {
+    $org = @((Get-GraphRestAll -Uri 'https://graph.microsoft.com/v1.0/organization')) | Select-Object -First 1
+    $initialDomain = @($org.VerifiedDomains | Where-Object { $_.Name -match '\.onmicrosoft\.com$' } | Select-Object -ExpandProperty Name -First 1)
+    $tenantSlug = if ($initialDomain) { $initialDomain -replace '\.onmicrosoft\.com$', '' } else { $null }
+
+    if ([string]::IsNullOrWhiteSpace($tenantSlug)) {
+        return $null
+    }
+
+    return "https://$($tenantSlug.ToLowerInvariant())-admin.sharepoint.com"
+}
+
+function Get-PnPClientIdForConnection {
+    if (-not [string]::IsNullOrWhiteSpace($PnPClientId)) {
+        return $PnPClientId
+    }
+
+    foreach ($envName in @('ENTRAID_APP_ID', 'ENTRAID_CLIENT_ID', 'PNP_CLIENT_ID')) {
+        $envValue = [Environment]::GetEnvironmentVariable($envName)
+        if (-not [string]::IsNullOrWhiteSpace($envValue)) {
+            return $envValue
+        }
+    }
+
+    return $null
+}
+
+function Connect-PnPForSharePointCollection {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$AdminUrl
+    )
+
+    $effectivePnPClientId = Get-PnPClientIdForConnection
+    $effectiveTenant = if (-not [string]::IsNullOrWhiteSpace($TenantId)) { $TenantId } else { $null }
+    $attemptErrors = [System.Collections.Generic.List[string]]::new()
+
+    $baseParams = @{
+        Url = $AdminUrl
+        ErrorAction = 'Stop'
+        WarningAction = 'SilentlyContinue'
+        InformationAction = 'SilentlyContinue'
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($effectiveTenant)) {
+        $baseParams['Tenant'] = $effectiveTenant
+    }
+    if (-not [string]::IsNullOrWhiteSpace($effectivePnPClientId)) {
+        $baseParams['ClientId'] = $effectivePnPClientId
+    }
+
+    $attempts = @(
+        @{ Name = 'Interactive'; ParameterName = 'Interactive' },
+        @{ Name = 'DeviceLogin'; ParameterName = 'DeviceLogin' },
+        @{ Name = 'OSLogin'; ParameterName = 'OSLogin' }
+    )
+
+    foreach ($attempt in $attempts) {
+        $connectParams = @{}
+        foreach ($key in $baseParams.Keys) {
+            $connectParams[$key] = $baseParams[$key]
+        }
+        $connectParams[$attempt.ParameterName] = $true
+
+        try {
+            Connect-PnPOnline @connectParams
+            return [ordered]@{
+                Succeeded = $true
+                Method = $attempt.Name
+                PnPClientIdUsed = if (-not [string]::IsNullOrWhiteSpace($effectivePnPClientId)) { $effectivePnPClientId } else { 'not provided' }
+            }
+        }
+        catch {
+            $attemptErrors.Add("$($attempt.Name): $($_.Exception.Message)") | Out-Null
+        }
+    }
+
+    $combinedReason = if ($attemptErrors.Count -gt 0) {
+        $attemptErrors -join ' | '
+    }
+    else {
+        'Unknown PnP authentication failure.'
+    }
+
+    $requiresClientIdHint = ($combinedReason -match 'Unable to connect using provided arguments') -or ($combinedReason -match 'ClientId')
+    if ($requiresClientIdHint -and [string]::IsNullOrWhiteSpace($effectivePnPClientId)) {
+        $combinedReason = "$combinedReason. PnP interactive auth may require an explicit Entra app id. Rerun with -PnPClientId <app-id> or set ENTRAID_APP_ID in the environment."
+    }
+
+    return [ordered]@{
+        Succeeded = $false
+        Reason = $combinedReason
+        PnPClientIdUsed = if (-not [string]::IsNullOrWhiteSpace($effectivePnPClientId)) { $effectivePnPClientId } else { 'not provided' }
+    }
+}
+
+function Invoke-SharePointChildCollector {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$AdminUrl,
+        [Parameter(Mandatory = $true)]
+        [switch]$Sample,
+        [Parameter(Mandatory = $true)]
+        [int]$Max
+    )
+
+    $childResult = $null
+    $connectFailed = $false
+
+    try {
+        Import-SilentPnPModule | Out-Null
+    }
+    catch {
+        return [ordered]@{
+            Status                = 'not collected'
+            Reason                = "PnP.PowerShell could not be loaded in the child SharePoint process: $($_.Exception.Message)"
+            ExternalSharingLevel  = 'not collected'
+            DefaultSharingLinkType = 'not collected'
+            RestrictedSearchEnabled = 'not collected'
+            TotalSiteCount        = 'not collected'
+            Truncated             = 'not collected'
+            Sites                 = @()
+            OneDriveCoveragePercent = 'not collected'
+            InactiveSiteCount     = 'not collected'
+            OversharingSignals    = [ordered]@{
+                Status                    = 'not collected'
+                CollectionMethod          = 'not collected'
+                CollectionScope           = 'not collected'
+                CollectionPathUsed        = 'not collected'
+                CollectionReason          = 'not collected'
+                RequiredForReliableCollection = 'not collected'
+                DocumentationNote         = 'not collected'
+                SampledAnyoneLinkCount    = 'not collected'
+                SampledOrgWideLinkCount   = 'not collected'
+                SitesWithAnyoneLinksCount = 'not collected'
+            }
+        }
+    }
+
+    $connectResult = Connect-PnPForSharePointCollection -AdminUrl $AdminUrl
+    if (-not $connectResult.Succeeded) {
+            $connectFailed = $true
+            return [ordered]@{
+                Status                = 'not collected'
+                Reason                = "SharePoint / PnP connection failed in the isolated child process: $($connectResult.Reason)"
+                ExternalSharingLevel  = 'not collected'
+                DefaultSharingLinkType = 'not collected'
+                RestrictedSearchEnabled = 'not collected'
+                TotalSiteCount        = 'not collected'
+                Truncated             = 'not collected'
+                Sites                 = @()
+                OneDriveCoveragePercent = 'not collected'
+                InactiveSiteCount     = 'not collected'
+                OversharingSignals    = [ordered]@{
+                    Status                    = 'not collected'
+                    CollectionMethod          = 'not collected'
+                    CollectionScope           = 'not collected'
+                    CollectionPathUsed        = 'not collected'
+                    CollectionReason          = 'not collected'
+                    RequiredForReliableCollection = 'not collected'
+                    DocumentationNote         = 'not collected'
+                    SampledAnyoneLinkCount    = 'not collected'
+                    SampledOrgWideLinkCount   = 'not collected'
+                    SitesWithAnyoneLinksCount = 'not collected'
+                }
+            }
+    }
+
+    if (-not $connectFailed) {
+        $childResult = Get-SharePointOneDriveReadinessLocal -Sample:$Sample -Max $Max
+    }
+
+    return $childResult
+}
+
+function Import-SilentPnPModule {
+    [CmdletBinding()]
+    param()
+
+    $alreadyLoaded = Get-Module -Name PnP.PowerShell | Select-Object -First 1
+    if ($null -ne $alreadyLoaded) {
+        return $alreadyLoaded
+    }
+
+    $candidateModules = @(Get-Module -ListAvailable -Name PnP.PowerShell | Sort-Object Version -Descending)
+    if ($candidateModules.Count -eq 0) {
+        throw 'PnP.PowerShell module is required.'
+    }
+
+    $preferredModule = $candidateModules | Where-Object { $_.Path -notlike '*WindowsPowerShell\Modules*' } | Select-Object -First 1
+    if ($null -eq $preferredModule) {
+        Install-Module -Name PnP.PowerShell -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop | Out-Null
+        $candidateModules = @(Get-Module -ListAvailable -Name PnP.PowerShell | Sort-Object Version -Descending)
+        $preferredModule = $candidateModules | Where-Object { $_.Path -notlike '*WindowsPowerShell\Modules*' } | Select-Object -First 1
+        if ($null -eq $preferredModule) {
+            throw 'Unable to locate a PowerShell 7 compatible PnP.PowerShell installation.'
+        }
+    }
+
+    Import-Module -Name $preferredModule.Path -ErrorAction Stop | Out-Null
+    return (Get-Module -Name PnP.PowerShell | Select-Object -First 1)
+}
+
+function Get-PnPAssemblyConflictState {
+    $tenantAssemblies = @(
+        [AppDomain]::CurrentDomain.GetAssemblies() |
+            Where-Object { $_.GetName().Name -eq 'Microsoft.Online.SharePoint.Client.Tenant' }
+    )
+
+    if ($tenantAssemblies.Count -eq 0) {
+        return [ordered]@{
+            ConflictDetected = $false
+            Reason = 'not loaded'
+            LoadedVersion = ''
+            ExpectedVersion = '16.1.0.0'
+            Location = ''
+        }
+    }
+
+    $loadedVersion = [string]$tenantAssemblies[0].GetName().Version
+    $location = ''
+    try { $location = [string]$tenantAssemblies[0].Location } catch {}
+
+    $conflictDetected = ($loadedVersion -ne '16.1.0.0')
+
+    return [ordered]@{
+        ConflictDetected = $conflictDetected
+        Reason = if ($conflictDetected) { 'version mismatch' } else { 'ok' }
+        LoadedVersion = $loadedVersion
+        ExpectedVersion = '16.1.0.0'
+        Location = $location
+    }
+}
+
+function Write-PnPAssemblyStartupGuidance {
+    $state = Get-PnPAssemblyConflictState
+    if (-not $state.ConflictDetected) { return }
+
+    $relaunchCommand = Get-CleanRelaunchCommand
+    Write-Warning ("Startup check: SharePoint CSOM assembly conflict detected (Microsoft.Online.SharePoint.Client.Tenant loaded=$($state.LoadedVersion), expected=$($state.ExpectedVersion)). Relaunch clean with: $relaunchCommand")
+}
+
 $script:Report = [ordered]@{
-    Metadata           = $null
-    Licensing          = $null
-    Identity           = $null
-    ConditionalAccess  = $null
-    DataGovernance     = $null
-    SharePointOneDrive = $null
-    Exchange           = $null
-    Teams              = $null
-    SearchIndex        = $null
-    Apps               = $null
-    SecureScore        = $null
-    AdoptionSignals    = $null
-    IdentityAccessAdvanced = $null
-    DataProtectionAdvanced = $null
+    Metadata                = $null
+    Licensing               = $null
+    Identity                = $null
+    ConditionalAccess       = $null
+    DataGovernance          = $null
+    SharePointOneDrive      = $null
+    Exchange                = $null
+    Teams                   = $null
+    SearchIndex             = $null
+    Apps                    = $null
+    SecureScore             = $null
+    AdoptionSignals         = $null
+    IdentityAccessAdvanced  = $null
+    DataProtectionAdvanced  = $null
     SharePointExposureAdvanced = $null
-    TeamsAdvanced      = $null
-    SearchSemanticAdvanced = $null
-    EndpointAppAdvanced = $null
-    AdoptionAdvanced   = $null
-    AppGovernanceAdvanced = $null
-    ReadinessFlags     = $null
-    ReadinessEvidence  = $null
-    Recommendations    = $null
-    PrerequisitesAndGaps = $null
-    CollectorTimings   = [ordered]@{}
-    Errors             = [System.Collections.Generic.List[object]]::new()
+    TeamsAdvanced           = $null
+    SearchSemanticAdvanced  = $null
+    EndpointAppAdvanced     = $null
+    AdoptionAdvanced        = $null
+    AppGovernanceAdvanced   = $null
+    ReadinessFlags          = $null
+    ReadinessEvidence       = $null
+    Recommendations         = $null
+    PrerequisitesAndGaps    = $null
+    CollectorTimings        = [ordered]@{}
+    Errors                  = [System.Collections.Generic.List[object]]::new()
 }
 $script:GraphAccessToken = $null
 $script:GraphAccessTokenExpiresAtUtc = $null
 $script:MgContext = $null
 $script:TeamsConnected = $false
+$script:SharePointChildCollectionSucceeded = $false
 $script:GraphMissingScopes = @()
 $script:GraphProvidedScopes = @()
 $script:GraphRestAllCache = @{}
+$script:GraphUsersCache = @{}
 $script:GraphReportRowsCache = @{}
 $script:CopilotUsageCache = @{}
-$script:GraphUsersCache = @{}
 $script:GraphRestMaxPageCount = 500
-$script:CollectorStepIndex = 0
-$script:CollectorStepTotal = 0
-$script:ScoringModel = [ordered]@{
-    # Explicit scoring model to avoid hard-coded magic numbers in Get-ReadinessEvidence.
-    IdentityAccess = [ordered]@{
-        MfaRegisteredPercentThreshold = 80
-        MfaRegisteredWeight = 50
-        AdvancedMfaPercentThreshold = 80
-        AdvancedMfaWeight = 30
-        ConditionalAccessPolicyThreshold = 3
-        ConditionalAccessWeight = 20
-    }
-    DataGovernance = [ordered]@{
-        LabelsPublishedWeight = 35
-        DlpEnforcedWeight = 35
-        RetentionEnabledWeight = 30
-    }
-    ContentExposure = [ordered]@{
-        OneDriveCoverageThreshold = 60
-        OneDriveCoverageWeight = 40
-        NoAnyoneLinksWeight = 30
-        AnyoneLinksPresentWeight = 10
-        RestrictedSearchWeight = 30
-    }
-    Adoption = [ordered]@{
-        ActiveUserHighThreshold = 60
-        ActiveUserMediumThreshold = 30
-        ActiveUserHighWeight = 60
-        ActiveUserMediumWeight = 40
-        ActiveUserLowWeight = 20
-        TrendReportedWeight = 40
-    }
-    EndpointReadiness = [ordered]@{
-        ComplianceHighThreshold = 80
-        ComplianceMediumThreshold = 60
-        HighScore = 100
-        MediumScore = 70
-        LowScore = 40
-    }
-    Confidence = [ordered]@{
-        HighThreshold = 85
-        MediumThreshold = 60
-        EvaluatedSections = @(
-            'Licensing',
-            'Identity',
-            'ConditionalAccess',
-            'DataGovernance',
-            'SharePointOneDrive',
-            'Exchange',
-            'Teams',
-            'SearchIndex',
-            'Apps',
-            'SecureScore',
-            'AdoptionSignals',
-            'IdentityAccessAdvanced',
-            'DataProtectionAdvanced',
-            'SharePointExposureAdvanced',
-            'TeamsAdvanced',
-            'SearchSemanticAdvanced',
-            'EndpointAppAdvanced',
-            'AdoptionAdvanced',
-            'AppGovernanceAdvanced'
-        )
-    }
-}
 
-function Get-DefaultGraphScopes {
-    return @(
-        'https://graph.microsoft.com/User.Read.All',
-        'https://graph.microsoft.com/Directory.Read.All',
-        'https://graph.microsoft.com/Group.Read.All',
-        'https://graph.microsoft.com/Organization.Read.All',
-        'https://graph.microsoft.com/Policy.Read.All',
-        'https://graph.microsoft.com/DeviceManagementManagedDevices.Read.All',
-        'https://graph.microsoft.com/Reports.Read.All',
-        'https://graph.microsoft.com/SecurityEvents.Read.All',
-        'https://graph.microsoft.com/AuditLog.Read.All',
-        'https://graph.microsoft.com/ExternalConnection.Read.All',
-        'https://graph.microsoft.com/InformationProtectionPolicy.Read.All'
-    )
-}
-
-function Get-RequiredGraphScopes {
-    # Baseline read-only permissions required for this script's core collectors.
-    return @(
-        'https://graph.microsoft.com/DeviceManagementManagedDevices.Read.All',
-        'https://graph.microsoft.com/Directory.Read.All',
-        'https://graph.microsoft.com/ExternalConnection.Read.All',
-        'https://graph.microsoft.com/Group.Read.All',
-        'https://graph.microsoft.com/InformationProtectionPolicy.Read.All',
-        'https://graph.microsoft.com/Organization.Read.All',
-        'https://graph.microsoft.com/Policy.Read.All',
-        'https://graph.microsoft.com/Reports.Read.All',
-        'https://graph.microsoft.com/SecurityEvents.Read.All'
-    )
-}
-
-function Test-GraphPermissionsAvailable {
-    param([string[]]$RequiredPermissions)
-
-    $missing = @($script:GraphMissingScopes)
-    if (@($missing).Count -eq 0) {
-        return $true
+function Initialize-GraphRuntimeState {
+    $graphRestAllCacheVar = Get-Variable -Name GraphRestAllCache -Scope Script -ErrorAction SilentlyContinue
+    if ($null -eq $graphRestAllCacheVar -or $null -eq $graphRestAllCacheVar.Value) {
+        $script:GraphRestAllCache = @{}
     }
 
-    $requiredNormalized = @($RequiredPermissions |
-        ForEach-Object { ConvertTo-NormalizedGraphPermissionName -Value $_ } |
-        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-        Sort-Object -Unique)
-    $missingNormalized = @($missing |
-        ForEach-Object { ConvertTo-NormalizedGraphPermissionName -Value $_ } |
-        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-        Sort-Object -Unique)
+    $graphUsersCacheVar = Get-Variable -Name GraphUsersCache -Scope Script -ErrorAction SilentlyContinue
+    if ($null -eq $graphUsersCacheVar -or $null -eq $graphUsersCacheVar.Value) {
+        $script:GraphUsersCache = @{}
+    }
 
-    return @($requiredNormalized | Where-Object { $_ -in $missingNormalized }).Count -eq 0
+    $graphReportRowsCacheVar = Get-Variable -Name GraphReportRowsCache -Scope Script -ErrorAction SilentlyContinue
+    if ($null -eq $graphReportRowsCacheVar -or $null -eq $graphReportRowsCacheVar.Value) {
+        $script:GraphReportRowsCache = @{}
+    }
+
+    $copilotUsageCacheVar = Get-Variable -Name CopilotUsageCache -Scope Script -ErrorAction SilentlyContinue
+    if ($null -eq $copilotUsageCacheVar -or $null -eq $copilotUsageCacheVar.Value) {
+        $script:CopilotUsageCache = @{}
+    }
+
+    $graphRestMaxPageCountVar = Get-Variable -Name GraphRestMaxPageCount -Scope Script -ErrorAction SilentlyContinue
+    if ($null -eq $graphRestMaxPageCountVar -or $null -eq $graphRestMaxPageCountVar.Value) {
+        $script:GraphRestMaxPageCount = 500
+    }
 }
 
 function Get-GraphTokenClaims {
@@ -423,6 +638,107 @@ function ConvertTo-NormalizedGraphPermissionName {
     $normalized = $normalized.ToLowerInvariant()
 
     return $normalized
+}
+
+function Get-RequiredGraphScopes {
+    $scopes = @(
+        'AuditLog.Read.All'
+        'DeviceManagementManagedDevices.Read.All'
+        'Directory.Read.All'
+        'ExternalConnection.Read.All'
+        'Group.Read.All'
+        'InformationProtectionPolicy.Read.All'
+        'Organization.Read.All'
+        'Policy.Read.All'
+        'Reports.Read.All'
+        'SecurityEvents.Read.All'
+    )
+
+    return @($scopes | Sort-Object -Unique)
+}
+
+function Get-DefaultGraphScopes {
+    # Keep the interactive default delegated scope set explicit so the startup guidance,
+    # consent expectations, and requested permissions stay aligned.
+    return @(
+        'AuditLog.Read.All'
+        'DeviceManagementManagedDevices.Read.All'
+        'Directory.Read.All'
+        'ExternalConnection.Read.All'
+        'Group.Read.All'
+        'InformationProtectionPolicy.Read.All'
+        'Organization.Read.All'
+        'Policy.Read.All'
+        'Reports.Read.All'
+        'SecurityEvents.Read.All'
+    )
+}
+
+function Test-GraphPermissionsAvailable {
+    param([string[]]$RequiredPermissions)
+
+    if ($null -eq $RequiredPermissions -or @($RequiredPermissions).Count -eq 0) {
+        return $true
+    }
+
+    $missingPermissions = @(Get-GraphMissingScopes -RequiredScopes $RequiredPermissions)
+    return $missingPermissions.Count -eq 0
+}
+
+function Get-DefaultScoringModel {
+    return [ordered]@{
+        IdentityAccess = [ordered]@{
+            MfaRegisteredWeight = 40
+            MfaRegisteredPercentThreshold = 80
+            AdvancedMfaWeight = 30
+            AdvancedMfaPercentThreshold = 20
+            ConditionalAccessWeight = 30
+            ConditionalAccessPolicyThreshold = 1
+        }
+        DataGovernance = [ordered]@{
+            LabelsPublishedWeight = 34
+            DlpEnforcedWeight = 33
+            RetentionEnabledWeight = 33
+        }
+        ContentExposure = [ordered]@{
+            OneDriveCoverageWeight = 34
+            OneDriveCoverageThreshold = 70
+            NoAnyoneLinksWeight = 33
+            AnyoneLinksPresentWeight = 0
+            RestrictedSearchWeight = 33
+        }
+        Adoption = [ordered]@{
+            ActiveUserHighWeight = 70
+            ActiveUserHighThreshold = 60
+            ActiveUserMediumThreshold = 35
+            ActiveUserMediumWeight = 40
+            ActiveUserLowWeight = 15
+            TrendReportedWeight = 30
+        }
+        EndpointReadiness = [ordered]@{
+            ComplianceHighThreshold = 90
+            ComplianceMediumThreshold = 75
+            HighScore = 100
+            MediumScore = 70
+            LowScore = 35
+        }
+        Confidence = [ordered]@{
+            EvaluatedSections = @(
+                'Identity',
+                'ConditionalAccess',
+                'DataGovernance',
+                'SharePointOneDrive',
+                'AdoptionSignals',
+                'IdentityAccessAdvanced',
+                'DataProtectionAdvanced',
+                'SharePointExposureAdvanced',
+                'AppGovernanceAdvanced',
+                'EndpointAppAdvanced'
+            )
+            HighThreshold = 85
+            MediumThreshold = 60
+        }
+    }
 }
 
 function Get-GraphMissingScopes {
@@ -1001,7 +1317,7 @@ function Get-CopilotUsageSnapshot {
     if (-not (Test-GraphPermissionsAvailable -RequiredPermissions @('Reports.Read.All'))) {
         return [ordered]@{
             Status      = 'not collected'
-            Reason      = 'missing Graph permission: Reports.Read.All'
+            Reason      = 'Missing Graph permission: Reports.Read.All'
             ActiveUsers = 'not collected'
             ReportDate  = 'not collected'
             RecordCount = 0
@@ -1145,6 +1461,8 @@ function Get-GraphRestAll {
         [switch]$BypassCache
     )
 
+    Initialize-GraphRuntimeState
+
     $requestUri = Add-GraphQueryString -Uri $Uri -Query $Query
     if (-not $BypassCache -and $script:GraphRestAllCache.ContainsKey($requestUri)) {
         return @($script:GraphRestAllCache[$requestUri])
@@ -1243,7 +1561,9 @@ function Get-DirectoryUsersForReadiness {
 function Connect-Services {
     Write-Step 'Connecting to Microsoft Graph and Microsoft 365 services...' -Color Yellow
 
-    try { Import-Module PnP.PowerShell -ErrorAction SilentlyContinue } catch {}
+    $teamsImportError = $null
+    try { Import-Module MicrosoftTeams -ErrorAction Stop } catch { $teamsImportError = $_.Exception.Message }
+    try { Import-Module PnP.PowerShell -ErrorAction Stop } catch {}
     try { Import-Module ExchangeOnlineManagement -ErrorAction SilentlyContinue } catch {}
 
     try {
@@ -1318,23 +1638,29 @@ function Connect-Services {
         else {
             if ($RequestRequiredGraphScopesUpFront -and $isDefaultMsClient) {
                 Write-Warning 'Upfront Graph scope mode works best with a custom app registration. The default Microsoft public client cannot reliably request this tenant-specific delegated scope set directly, so a custom GraphClientId is recommended.'
+                Write-Step 'Rerun for full delegated consent with: -GraphClientId <your-app-id> -RequestRequiredGraphScopesUpFront' -Color DarkYellow
             }
 
             if ($isDefaultMsClient -and ($graphScopes -notcontains 'https://graph.microsoft.com/.default')) {
                 Write-Warning 'The Microsoft first-party client ID cannot request tenant-specific delegated Graph scopes directly. Falling back to https://graph.microsoft.com/.default to avoid AADSTS65002.'
+                Write-Step 'For the full exporter delegated scope set, rerun with: -GraphClientId <your-app-id> -RequestRequiredGraphScopesUpFront' -Color DarkYellow
                 $graphScopes = @('https://graph.microsoft.com/.default')
             }
 
             if ($graphScopes -contains 'https://graph.microsoft.com/.default') {
                 Write-Step 'Using Graph default scope set for device-code authentication.' -Color DarkYellow
+                if ($isDefaultMsClient) {
+                    Write-Step 'To request all exporter delegated Graph permissions explicitly, rerun with: -GraphClientId <your-app-id> -RequestRequiredGraphScopesUpFront' -Color DarkYellow
+                }
             }
             else {
                 $consentUrl = Get-GraphAdminConsentUrl -TenantId $TenantId -ClientId $GraphClientId
                 if ($RequestRequiredGraphScopesUpFront) {
-                    Write-Step 'Requesting the exporter\'s full delegated Graph scope set up front so consent can be granted before collection starts.' -Color DarkYellow
+                    Write-Step 'Requesting the exporter''s full delegated Graph scope set up front so consent can be granted before collection starts.' -Color DarkYellow
                 }
                 else {
                     Write-Step 'Requesting the required delegated Graph permissions so the tenant can consent to them if needed.' -Color DarkYellow
+                    Write-Step 'To force consent up front, rerun with: -GraphClientId <your-app-id> -RequestRequiredGraphScopesUpFront' -Color DarkYellow
                 }
                 Write-Step "If sign-in fails due to missing consent, grant admin consent for the custom app registration: $consentUrl" -Color DarkYellow
             }
@@ -1351,7 +1677,33 @@ function Connect-Services {
 
     $script:TeamsConnected = $false
     try {
-        if (Get-Command Connect-MicrosoftTeams -ErrorAction SilentlyContinue) {
+        $teamsModuleAvailable = [bool](Get-Module -ListAvailable -Name MicrosoftTeams -ErrorAction SilentlyContinue)
+        $teamsConnectCommand = Get-Command Connect-MicrosoftTeams -ErrorAction SilentlyContinue
+        $teamsCmdletAvailable = $null -ne $teamsConnectCommand
+
+        if ($teamsCmdletAvailable) {
+            $existingTeamsSession = $false
+            if (-not $ForceInteractiveTeamsPnPLogin) {
+                try {
+                    if (Get-Command Get-CsTenant -ErrorAction SilentlyContinue) {
+                        $null = Get-CsTenant -ErrorAction Stop
+                        $existingTeamsSession = $true
+                    }
+                }
+                catch {
+                    $existingTeamsSession = $false
+                }
+            }
+
+            if ($existingTeamsSession) {
+                $script:TeamsConnected = $true
+                Write-Step 'Reusing existing Microsoft Teams session.' -Color Green
+            }
+            else {
+                if ($ForceInteractiveTeamsPnPLogin) {
+                    Write-Step 'Force interactive mode enabled: starting a fresh Microsoft Teams sign-in attempt.' -Color DarkYellow
+                }
+
             try {
                 $teamsParams = @{ ErrorAction = 'Stop' }
                 if (-not [string]::IsNullOrWhiteSpace($TenantId)) {
@@ -1366,9 +1718,20 @@ function Connect-Services {
                 $script:TeamsConnected = $false
                 Write-Warning "Teams sign-in was not available during startup: $($_.Exception.Message)"
             }
+            }
         }
         else {
-            Write-Step 'Microsoft Teams cmdlets are not available in this session.' -Color DarkYellow
+            if ($teamsModuleAvailable) {
+                if (-not [string]::IsNullOrWhiteSpace($teamsImportError)) {
+                    Write-Step ("MicrosoftTeams module is installed, but failed to import in this session: {0}" -f $teamsImportError) -Color DarkYellow
+                }
+                else {
+                    Write-Step 'MicrosoftTeams module is installed, but Connect-MicrosoftTeams is not available in this session.' -Color DarkYellow
+                }
+            }
+            else {
+                Write-Step 'Microsoft Teams cmdlets are not available in this session because the MicrosoftTeams module is not installed.' -Color DarkYellow
+            }
         }
     }
     catch {
@@ -1376,37 +1739,7 @@ function Connect-Services {
         Write-Warning "Teams connection check failed: $($_.Exception.Message)"
     }
 
-    try {
-        $pnpConnected = $false
-        if (Get-Command Get-PnPConnection -ErrorAction SilentlyContinue) {
-            $pnpConnected = $null -ne (Get-PnPConnection -ErrorAction SilentlyContinue)
-        }
-
-        if (-not $pnpConnected -and (Get-Command Connect-PnPOnline -ErrorAction SilentlyContinue)) {
-            Write-Step 'Connecting to SharePoint / PnP for site metadata...' -Color Cyan
-            $org = @((Get-GraphRestAll -Uri 'https://graph.microsoft.com/v1.0/organization')) | Select-Object -First 1
-            $initialDomain = @($org.VerifiedDomains | Where-Object { $_.Name -match '\.onmicrosoft\.com$' } | Select-Object -ExpandProperty Name -First 1)
-            $tenantSlug = if ($initialDomain) { $initialDomain -replace '\.onmicrosoft\.com$', '' } else { $null }
-            $adminUrl = if ($tenantSlug) {
-                "https://$($tenantSlug.ToLowerInvariant())-admin.sharepoint.com"
-            }
-            else { $null }
-            if ($adminUrl -and $adminUrl -match '^https://.+') {
-                Connect-PnPOnline -Url $adminUrl -Interactive -ErrorAction Stop -WarningAction SilentlyContinue -InformationAction SilentlyContinue 3>$null 6>$null
-                $pnpConnected = $true
-                Write-Step 'Connected to SharePoint / PnP.' -Color Green
-            }
-        }
-        elseif ($pnpConnected) {
-            Write-Step 'Reusing the existing SharePoint / PnP session.' -Color Green
-        }
-        else {
-            Write-Step 'SharePoint / PnP cmdlets are not available in this session.' -Color DarkYellow
-        }
-    }
-    catch {
-        Write-Verbose "SharePoint / PnP connection skipped or unavailable: $($_.Exception.Message)"
-    }
+    Write-Step 'SharePoint / PnP collection will run in a clean child PowerShell process.' -Color Cyan
 
     try {
         $exoConnected = $false
@@ -1516,43 +1849,100 @@ function Disconnect-Services {
 # ============================================================================
 
 function Get-TenantMetadata {
-    if (-not (Test-GraphPermissionsAvailable -RequiredPermissions @('Directory.Read.All', 'Organization.Read.All'))) {
-        return [ordered]@{
-            Status               = 'not collected'
-            Reason               = 'Missing Graph permission: Directory.Read.All and/or Organization.Read.All'
-            TenantName           = 'not collected'
-            TenantId             = 'not collected'
-            DefaultDomain        = 'not collected'
-            GeoLocation          = 'not collected'
-            ScriptVersion        = '1.0'
-            RunTimestampUtc      = (Get-Date).ToUniversalTime().ToString('o')
-            ExecutingAdmin       = if ($script:MgContext) { $script:MgContext.Account } else { 'not collected' }
-            GrantedScopes        = if ($script:MgContext -and $script:MgContext.Scopes) { @($script:MgContext.Scopes) } elseif (@($script:GraphProvidedScopes).Count -gt 0) { @($script:GraphProvidedScopes) } else { 'not collected' }
-            ConsentStatus        = if (@($script:GraphMissingScopes).Count -gt 0) { 'partial' } else { 'complete' }
-            MissingGraphPermissions = @($script:GraphMissingScopes)
-            TotalUsers           = 'not collected'
-            MemberUsers          = 'not collected'
-            GuestUsers           = 'not collected'
-            IncludeSampling      = [bool]$IncludeSampling
-            IncludeDetailedData  = [bool]$IncludeDetailedData
-            SampleSize           = [int]$SampleSize
+    $org = $null
+    $users = @()
+    $userCount = 'not collected'
+    $memberCount = 'not collected'
+    $guestCount = 'not collected'
+    $defaultDomain = 'not collected'
+    $geoLocation = 'not collected'
+
+    $missingMetadataScopes = @(Get-GraphMissingScopes -RequiredScopes @('Directory.Read.All', 'Organization.Read.All'))
+    $canReadOrganization = @((Get-GraphMissingScopes -RequiredScopes @('Organization.Read.All'))).Count -eq 0
+    $canReadUsers = @((Get-GraphMissingScopes -RequiredScopes @('Directory.Read.All'))).Count -eq 0
+
+    if ($canReadOrganization) {
+        try {
+            $org = @((Get-GraphRestAll -Uri 'https://graph.microsoft.com/v1.0/organization')) | Select-Object -First 1
+            $defaultDomainValue = @($org.VerifiedDomains | Where-Object { $_.IsDefault -eq $true } | Select-Object -ExpandProperty Name -First 1)
+            if (-not [string]::IsNullOrWhiteSpace([string]$defaultDomainValue)) {
+                $defaultDomain = [string]$defaultDomainValue
+            }
+
+            $geoLocationValue = Get-ObjectPropertyValue -InputObject $org -Name 'CountryLetterCode' -Default 'not collected'
+            if (Test-ValueCollected -Value $geoLocationValue) {
+                $geoLocation = [string]$geoLocationValue
+            }
+        }
+        catch {
+            $org = $null
         }
     }
 
-    $org = @((Get-GraphRestAll -Uri 'https://graph.microsoft.com/v1.0/organization')) | Select-Object -First 1
-    $users = @(Get-DirectoryUsersForReadiness)
-    $userCount = @($users).Count
-    $memberCount = @($users | Where-Object { ([string](Get-ObjectPropertyValue -InputObject $_ -Name 'userType' -Default '')) -ne 'Guest' }).Count
-    $guestCount = @($users | Where-Object { ([string](Get-ObjectPropertyValue -InputObject $_ -Name 'userType' -Default '')) -eq 'Guest' }).Count
-    $defaultDomain = @($org.VerifiedDomains | Where-Object { $_.IsDefault -eq $true } | Select-Object -ExpandProperty Name -First 1)
+    if ($canReadUsers) {
+        try {
+            $users = @(Get-DirectoryUsersForReadiness)
+            $userCount = @($users).Count
+            $memberCount = @($users | Where-Object { ([string](Get-ObjectPropertyValue -InputObject $_ -Name 'userType' -Default '')) -ne 'Guest' }).Count
+            $guestCount = @($users | Where-Object { ([string](Get-ObjectPropertyValue -InputObject $_ -Name 'userType' -Default '')) -eq 'Guest' }).Count
+        }
+        catch {
+            $userCount = 'not collected'
+            $memberCount = 'not collected'
+            $guestCount = 'not collected'
+        }
+    }
+
+    $contextTenantId = Get-ObjectPropertyValue -InputObject $script:MgContext -Name 'TenantId' -Default 'not collected'
+    $tenantIdValue = Get-ObjectPropertyValue -InputObject $org -Name 'Id' -Default 'not collected'
+    if (-not (Test-ValueCollected -Value $tenantIdValue)) {
+        if (-not [string]::IsNullOrWhiteSpace($TenantId)) {
+            $tenantIdValue = $TenantId
+        }
+        elseif (Test-ValueCollected -Value $contextTenantId) {
+            $tenantIdValue = $contextTenantId
+        }
+    }
+
+    $tenantNameValue = Get-ObjectPropertyValue -InputObject $org -Name 'DisplayName' -Default 'not collected'
+    if (-not (Test-ValueCollected -Value $tenantNameValue)) {
+        $adminUpn = [string](Get-ObjectPropertyValue -InputObject $script:MgContext -Name 'Account' -Default '')
+        if (-not [string]::IsNullOrWhiteSpace($adminUpn) -and $adminUpn.Contains('@')) {
+            $tenantNameValue = ($adminUpn.Split('@')[-1]).ToLowerInvariant()
+        }
+        elseif (Test-ValueCollected -Value $defaultDomain) {
+            $tenantNameValue = [string]$defaultDomain
+        }
+    }
+
+    if (-not (Test-ValueCollected -Value $defaultDomain)) {
+        $defaultDomainFromAccount = [string](Get-ObjectPropertyValue -InputObject $script:MgContext -Name 'Account' -Default '')
+        if (-not [string]::IsNullOrWhiteSpace($defaultDomainFromAccount) -and $defaultDomainFromAccount.Contains('@')) {
+            $defaultDomain = ($defaultDomainFromAccount.Split('@')[-1]).ToLowerInvariant()
+        }
+    }
+
+    $reason = ''
+    $status = 'reported'
+    if (@($missingMetadataScopes).Count -gt 0) {
+        $status = 'partial'
+        $reason = "Missing Graph permission(s): $(@($missingMetadataScopes) -join ', '). Metadata fields were populated from available fallback sources where possible."
+    }
+
+    if (-not (Test-ValueCollected -Value $tenantIdValue) -and -not (Test-ValueCollected -Value $tenantNameValue)) {
+        $status = 'not collected'
+        if ([string]::IsNullOrWhiteSpace($reason)) {
+            $reason = 'Tenant metadata was unavailable from both Microsoft Graph and current auth context.'
+        }
+    }
 
     return [ordered]@{
-        Status             = 'reported'
-        Reason             = ''
-        TenantName         = $org.DisplayName
-        TenantId           = $org.Id
-        DefaultDomain      = $defaultDomain
-        GeoLocation        = $org.CountryLetterCode
+        Status             = $status
+        Reason             = $reason
+        TenantName         = if (Test-ValueCollected -Value $tenantNameValue) { $tenantNameValue } else { 'not collected' }
+        TenantId           = if (Test-ValueCollected -Value $tenantIdValue) { $tenantIdValue } else { 'not collected' }
+        DefaultDomain      = if (Test-ValueCollected -Value $defaultDomain) { $defaultDomain } else { 'not collected' }
+        GeoLocation        = $geoLocation
         ScriptVersion      = '1.0'
         RunTimestampUtc    = (Get-Date).ToUniversalTime().ToString('o')
         ExecutingAdmin     = if ($script:MgContext) { $script:MgContext.Account } else { 'not collected' }
@@ -1665,89 +2055,158 @@ function Get-LicensingReadiness {
 }
 
 function Get-IdentityReadiness {
-    if (-not (Test-GraphPermissionsAvailable -RequiredPermissions @('AuditLog.Read.All', 'Directory.Read.All'))) {
-        return [ordered]@{
-            Status               = 'not collected'
-            Reason               = 'Missing Graph permission: AuditLog.Read.All and/or Directory.Read.All'
-            MfaCapableCount      = 'not collected'
-            MfaRegisteredCount   = 'not collected'
-            PasswordlessCount    = 'not collected'
-            MfaPopulationUserCount = 'not collected'
-            MfaPopulationSource  = 'not collected'
-            MfaSummaryTotalUserCount = 'not collected'
-            MfaSummaryUserTypes  = 'not collected'
-            MfaSummaryUserRoles  = 'not collected'
-            MfaCapableSummaryCount = 'not collected'
-            GuestUsers           = 'not collected'
-            StaleUsers           = 'not collected'
-            GlobalAdminCount     = 'not collected'
-            PrivilegedRoleCount  = 'not collected'
-            SecurityDefaultsEnabled = 'not collected'
-        }
-    }
+    $missingCoreScopes = @(Get-GraphMissingScopes -RequiredScopes @('AuditLog.Read.All', 'Directory.Read.All'))
+    $hasAuditLogRead = @((Get-GraphMissingScopes -RequiredScopes @('AuditLog.Read.All'))).Count -eq 0
+    $hasDirectoryRead = @((Get-GraphMissingScopes -RequiredScopes @('Directory.Read.All'))).Count -eq 0
 
-    $auth = @((Get-GraphRestAll -Uri 'https://graph.microsoft.com/v1.0/reports/authenticationMethods/userRegistrationDetails'))
-    $featureSummary = Get-UserRegistrationFeatureSummary -IncludedUserTypes 'all' -IncludedUserRoles 'all'
-    $mfaCapable = @($auth | Where-Object { $_.IsMfaCapable -eq $true }).Count
-    $mfaRegistered = @($auth | Where-Object { $_.IsMfaRegistered -eq $true }).Count
-    $passwordless = @($auth | Where-Object { $_.IsPasswordlessCapable -eq $true }).Count
-
+    $auth = @()
+    $featureSummary = $null
+    $mfaCapable = 'not collected'
+    $mfaRegistered = 'not collected'
+    $passwordless = 'not collected'
     $mfaPopulationUserCount = 'not collected'
     $mfaPopulationSource = 'not collected'
-    if (@($auth).Count -gt 0) {
-        $mfaPopulationUserCount = @($auth).Count
-        $mfaPopulationSource = 'reports/authenticationMethods/userRegistrationDetails row count'
-    }
-    elseif ($featureSummary -and $featureSummary.PSObject.Properties.Name -contains 'totalUserCount') {
-        $mfaPopulationUserCount = Get-IntValue -Value $featureSummary.totalUserCount -Default 0
-        $mfaPopulationSource = 'reports/authenticationMethods/usersRegisteredByFeature totalUserCount fallback'
-    }
+    $mfaSummaryTotalUserCount = 'not collected'
+    $mfaSummaryUserTypes = 'not collected'
+    $mfaSummaryUserRoles = 'not collected'
+    $mfaCapableSummaryCount = 'not collected'
 
-    $mfaCapableSummaryCount = $null
-    if ($featureSummary -and $featureSummary.PSObject.Properties.Name -contains 'userRegistrationFeatureCounts') {
-        $mfaCapableSummaryCount = Get-UserRegistrationFeatureCount -FeatureCounts $featureSummary.userRegistrationFeatureCounts -FeatureName 'mfaCapable'
-    }
-
-    $roles = @((Get-GraphRestAll -Uri 'https://graph.microsoft.com/v1.0/directoryRoles'))
-    $targetRoleNames = @(
-        'Global Administrator','Exchange Administrator','SharePoint Administrator',
-        'Teams Administrator','Security Administrator','Compliance Administrator',
-        'Conditional Access Administrator','Privileged Role Administrator'
-    )
-    $globalAdminCount = 0
-    $privilegedRoleCount = 0
-
-    foreach ($role in ($roles | Where-Object { $_.DisplayName -in $targetRoleNames })) {
-        $members = @((Get-GraphRestAll -Uri "https://graph.microsoft.com/v1.0/directoryRoles/$($role.Id)/members" -Query @{ '$select' = 'id' }))
-        $memberCount = @($members).Count
-
-        if ($role.DisplayName -match 'Global Administrator') {
-            $globalAdminCount = $memberCount
+    if ($hasAuditLogRead) {
+        try {
+            $auth = @((Get-GraphRestAll -Uri 'https://graph.microsoft.com/v1.0/reports/authenticationMethods/userRegistrationDetails'))
         }
-        elseif ($role.DisplayName -match 'Exchange|SharePoint|Teams|Security|Compliance|Conditional Access|Privileged') {
-            $privilegedRoleCount += $memberCount
+        catch {
+            $auth = @()
         }
-    }
 
-    $users = @(Get-DirectoryUsersForReadiness -IncludeSignInActivity)
-    $guestUsers = @($users | Where-Object { ([string](Get-ObjectPropertyValue -InputObject $_ -Name 'userType' -Default '')) -eq 'Guest' }).Count
-    $staleUsers = 0
-    foreach ($u in $users) {
-        $last = $null
-        if ($u.PSObject.Properties.Name -contains 'SignInActivity' -and $null -ne $u.SignInActivity) {
-            if ($u.SignInActivity.PSObject.Properties.Name -contains 'LastSignInDateTime') {
-                $last = $u.SignInActivity.LastSignInDateTime
+        try {
+            $featureSummary = Get-UserRegistrationFeatureSummary -IncludedUserTypes 'all' -IncludedUserRoles 'all'
+        }
+        catch {
+            $featureSummary = $null
+        }
+
+        $mfaCapable = @($auth | Where-Object { $_.IsMfaCapable -eq $true }).Count
+        $mfaRegistered = @($auth | Where-Object { $_.IsMfaRegistered -eq $true }).Count
+        $passwordless = @($auth | Where-Object { $_.IsPasswordlessCapable -eq $true }).Count
+
+        if (@($auth).Count -gt 0) {
+            $mfaPopulationUserCount = @($auth).Count
+            $mfaPopulationSource = 'reports/authenticationMethods/userRegistrationDetails row count'
+        }
+        elseif ($featureSummary -and $featureSummary.PSObject.Properties.Name -contains 'totalUserCount') {
+            $mfaPopulationUserCount = Get-IntValue -Value $featureSummary.totalUserCount -Default 0
+            $mfaPopulationSource = 'reports/authenticationMethods/usersRegisteredByFeature totalUserCount fallback'
+        }
+
+        if ($featureSummary -and $featureSummary.PSObject.Properties.Name -contains 'totalUserCount') {
+            $mfaSummaryTotalUserCount = Get-IntValue -Value $featureSummary.totalUserCount -Default 0
+        }
+        if ($featureSummary -and $featureSummary.PSObject.Properties.Name -contains 'userTypes') {
+            $mfaSummaryUserTypes = [string]$featureSummary.userTypes
+        }
+        if ($featureSummary -and $featureSummary.PSObject.Properties.Name -contains 'userRoles') {
+            $mfaSummaryUserRoles = [string]$featureSummary.userRoles
+        }
+        if ($featureSummary -and $featureSummary.PSObject.Properties.Name -contains 'userRegistrationFeatureCounts') {
+            $mfaCapableSummary = Get-UserRegistrationFeatureCount -FeatureCounts $featureSummary.userRegistrationFeatureCounts -FeatureName 'mfaCapable'
+            if ($null -ne $mfaCapableSummary) {
+                $mfaCapableSummaryCount = $mfaCapableSummary
             }
         }
+    }
 
-        if ($last) {
-            if ((Get-Date).ToUniversalTime() - [DateTime]$last -gt [TimeSpan]::FromDays(90)) { $staleUsers++ }
+    $globalAdminCount = 'not collected'
+    $privilegedRoleCount = 'not collected'
+    $guestUsers = 'not collected'
+    $staleUsers = 'not collected'
+
+    if ($hasDirectoryRead) {
+        $targetRoleNames = @(
+            'Global Administrator','Exchange Administrator','SharePoint Administrator',
+            'Teams Administrator','Security Administrator','Compliance Administrator',
+            'Conditional Access Administrator','Privileged Role Administrator'
+        )
+        $globalAdminCount = 0
+        $privilegedRoleCount = 0
+
+        try {
+            $roles = @((Get-GraphRestAll -Uri 'https://graph.microsoft.com/v1.0/directoryRoles'))
+            foreach ($role in ($roles | Where-Object { $_.DisplayName -in $targetRoleNames })) {
+                $members = @((Get-GraphRestAll -Uri "https://graph.microsoft.com/v1.0/directoryRoles/$($role.Id)/members" -Query @{ '$select' = 'id' }))
+                $memberCount = @($members).Count
+
+                if ($role.DisplayName -match 'Global Administrator') {
+                    $globalAdminCount = $memberCount
+                }
+                elseif ($role.DisplayName -match 'Exchange|SharePoint|Teams|Security|Compliance|Conditional Access|Privileged') {
+                    $privilegedRoleCount += $memberCount
+                }
+            }
+        }
+        catch {
+            $globalAdminCount = 'not collected'
+            $privilegedRoleCount = 'not collected'
+        }
+
+        try {
+            $users = @(Get-DirectoryUsersForReadiness -IncludeSignInActivity)
+            $guestUsers = @($users | Where-Object { ([string](Get-ObjectPropertyValue -InputObject $_ -Name 'userType' -Default '')) -eq 'Guest' }).Count
+            $staleUsers = 0
+            foreach ($u in $users) {
+                $last = $null
+                if ($u.PSObject.Properties.Name -contains 'SignInActivity' -and $null -ne $u.SignInActivity) {
+                    if ($u.SignInActivity.PSObject.Properties.Name -contains 'LastSignInDateTime') {
+                        $last = $u.SignInActivity.LastSignInDateTime
+                    }
+                }
+
+                if ($last) {
+                    if ((Get-Date).ToUniversalTime() - [DateTime]$last -gt [TimeSpan]::FromDays(90)) { $staleUsers++ }
+                }
+            }
+        }
+        catch {
+            $guestUsers = 'not collected'
+            $staleUsers = 'not collected'
         }
     }
 
-    $securityDefaults = Get-GraphRest -Uri 'https://graph.microsoft.com/v1.0/policies/identitySecurityDefaultsEnforcementPolicy'
-    $identityStatus = if (Test-GraphPermissionsAvailable -RequiredPermissions @('Policy.Read.All')) { 'reported' } else { 'partial' }
-    $identityReason = if ($identityStatus -eq 'partial') { 'Security defaults could not be collected because Policy.Read.All is missing.' } else { '' }
+    $securityDefaults = $null
+    if (Test-GraphPermissionsAvailable -RequiredPermissions @('Policy.Read.All')) {
+        try {
+            $securityDefaults = Get-GraphRest -Uri 'https://graph.microsoft.com/v1.0/policies/identitySecurityDefaultsEnforcementPolicy'
+        }
+        catch {
+            $securityDefaults = $null
+        }
+    }
+
+    $reasons = [System.Collections.Generic.List[string]]::new()
+    if (@($missingCoreScopes).Count -gt 0) {
+        $reasons.Add("Missing Graph permission(s): $(@($missingCoreScopes) -join ', ')") | Out-Null
+    }
+    if (-not (Test-GraphPermissionsAvailable -RequiredPermissions @('Policy.Read.All'))) {
+        $reasons.Add('Security defaults could not be collected because Policy.Read.All is missing.') | Out-Null
+    }
+
+    $hasAnyCoreData =
+        (Test-ValueCollected -Value $mfaCapable) -or
+        (Test-ValueCollected -Value $mfaRegistered) -or
+        (Test-ValueCollected -Value $passwordless) -or
+        (Test-ValueCollected -Value $guestUsers) -or
+        (Test-ValueCollected -Value $staleUsers) -or
+        (Test-ValueCollected -Value $globalAdminCount) -or
+        (Test-ValueCollected -Value $privilegedRoleCount)
+
+    $identityStatus = if ($hasAnyCoreData) {
+        if ($reasons.Count -gt 0) { 'partial' } else { 'reported' }
+    }
+    else {
+        'not collected'
+    }
+
+    $identityReason = if ($reasons.Count -gt 0) { $reasons -join ' ' } else { '' }
 
     return [ordered]@{
         Status               = $identityStatus
@@ -1757,10 +2216,10 @@ function Get-IdentityReadiness {
         PasswordlessCount    = $passwordless
         MfaPopulationUserCount = $mfaPopulationUserCount
         MfaPopulationSource  = $mfaPopulationSource
-        MfaSummaryTotalUserCount = if ($featureSummary -and $featureSummary.PSObject.Properties.Name -contains 'totalUserCount') { Get-IntValue -Value $featureSummary.totalUserCount -Default 0 } else { 'not collected' }
-        MfaSummaryUserTypes  = if ($featureSummary -and $featureSummary.PSObject.Properties.Name -contains 'userTypes') { [string]$featureSummary.userTypes } else { 'not collected' }
-        MfaSummaryUserRoles  = if ($featureSummary -and $featureSummary.PSObject.Properties.Name -contains 'userRoles') { [string]$featureSummary.userRoles } else { 'not collected' }
-        MfaCapableSummaryCount = if ($null -ne $mfaCapableSummaryCount) { $mfaCapableSummaryCount } else { 'not collected' }
+        MfaSummaryTotalUserCount = $mfaSummaryTotalUserCount
+        MfaSummaryUserTypes  = $mfaSummaryUserTypes
+        MfaSummaryUserRoles  = $mfaSummaryUserRoles
+        MfaCapableSummaryCount = $mfaCapableSummaryCount
         GuestUsers           = $guestUsers
         StaleUsers           = $staleUsers
         GlobalAdminCount     = $globalAdminCount
@@ -1774,8 +2233,8 @@ function Get-IdentityReadiness {
 function Get-ConditionalAccessReadiness {
     if (-not (Test-GraphPermissionsAvailable -RequiredPermissions @('Policy.Read.All'))) {
         return [ordered]@{
-            Status = 'not collected'
-            Reason = 'Missing Graph permission: Policy.Read.All'
+            Status = 'partial'
+            Reason = 'Missing Graph permission: Policy.Read.All. Conditional Access policy inventory and coverage signals were not collected.'
             TotalPolicies = 'not collected'
             EnabledPolicies = 'not collected'
             CoverageFlags = [ordered]@{
@@ -1911,6 +2370,152 @@ function Get-DataGovernanceReadiness {
 }
 
 function Get-SharePointOneDriveReadiness {
+    [CmdletBinding()]
+    param([switch]$Sample, [int]$Max = 200)
+
+    if ($script:SharePointChildCollectionSucceeded) {
+        return Get-SharePointOneDriveReadinessLocal -Sample:$Sample -Max $Max
+    }
+
+    $adminUrl = Get-SharePointAdminUrl
+    if ([string]::IsNullOrWhiteSpace($adminUrl)) {
+        return [ordered]@{
+            Status                = 'not collected'
+            Reason                = 'Unable to determine the SharePoint admin URL for the child process.'
+            ExternalSharingLevel  = 'not collected'
+            DefaultSharingLinkType = 'not collected'
+            RestrictedSearchEnabled = 'not collected'
+            TotalSiteCount        = 'not collected'
+            Truncated             = 'not collected'
+            Sites                 = @()
+            OneDriveCoveragePercent = 'not collected'
+            InactiveSiteCount     = 'not collected'
+            OversharingSignals    = [ordered]@{
+                Status                    = 'not collected'
+                CollectionMethod          = 'not collected'
+                CollectionScope           = 'not collected'
+                CollectionPathUsed        = 'not collected'
+                CollectionReason          = 'not collected'
+                RequiredForReliableCollection = 'not collected'
+                DocumentationNote         = 'not collected'
+                SampledAnyoneLinkCount    = 'not collected'
+                SampledOrgWideLinkCount   = 'not collected'
+                SitesWithAnyoneLinksCount = 'not collected'
+            }
+        }
+    }
+
+    $pwshPath = (Get-Command pwsh -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1)
+    if ([string]::IsNullOrWhiteSpace($pwshPath) -or -not (Test-Path -LiteralPath $pwshPath)) {
+        return [ordered]@{
+            Status                = 'not collected'
+            Reason                = "PowerShell 7 executable 'pwsh' not found for the SharePoint child process."
+            ExternalSharingLevel  = 'not collected'
+            DefaultSharingLinkType = 'not collected'
+            RestrictedSearchEnabled = 'not collected'
+            TotalSiteCount        = 'not collected'
+            Truncated             = 'not collected'
+            Sites                 = @()
+            OneDriveCoveragePercent = 'not collected'
+            InactiveSiteCount     = 'not collected'
+            OversharingSignals    = [ordered]@{
+                Status                    = 'not collected'
+                CollectionMethod          = 'not collected'
+                CollectionScope           = 'not collected'
+                CollectionPathUsed        = 'not collected'
+                CollectionReason          = 'not collected'
+                RequiredForReliableCollection = 'not collected'
+                DocumentationNote         = 'not collected'
+                SampledAnyoneLinkCount    = 'not collected'
+                SampledOrgWideLinkCount   = 'not collected'
+                SitesWithAnyoneLinksCount = 'not collected'
+            }
+        }
+    }
+
+    $childArgs = @(
+        '-NoProfile',
+        '-NoLogo',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', $PSCommandPath,
+        '-SharePointCollectionChild',
+        '-SharePointAdminUrl', $adminUrl
+    )
+    if (-not [string]::IsNullOrWhiteSpace($TenantId)) { $childArgs += @('-TenantId', $TenantId) }
+    if (-not [string]::IsNullOrWhiteSpace($PnPClientId)) { $childArgs += @('-PnPClientId', $PnPClientId) }
+    if (-not [string]::IsNullOrWhiteSpace($GraphClientId)) { $childArgs += @('-GraphClientId', $GraphClientId) }
+    if ($Sample) { $childArgs += '-IncludeSampling' }
+    if ($Max -ne 200) { $childArgs += @('-SampleSize', [string]$Max) }
+
+    $childOutput = & $pwshPath @childArgs 2>&1 | Out-String
+    if ([string]::IsNullOrWhiteSpace($childOutput)) {
+        return [ordered]@{
+            Status                  = 'not collected'
+            Reason                  = 'SharePoint child process returned no output.'
+            ExternalSharingLevel    = 'not collected'
+            DefaultSharingLinkType  = 'not collected'
+            RestrictedSearchEnabled = 'not collected'
+            TotalSiteCount          = 'not collected'
+            Truncated               = 'not collected'
+            Sites                   = @()
+            OneDriveCoveragePercent = 'not collected'
+            InactiveSiteCount       = 'not collected'
+            OversharingSignals      = [ordered]@{
+                Status                        = 'not collected'
+                CollectionMethod              = 'not collected'
+                CollectionScope               = 'not collected'
+                CollectionPathUsed            = 'not collected'
+                CollectionReason              = 'not collected'
+                RequiredForReliableCollection = 'not collected'
+                DocumentationNote             = 'not collected'
+                SampledAnyoneLinkCount        = 'not collected'
+                SampledOrgWideLinkCount       = 'not collected'
+                SitesWithAnyoneLinksCount     = 'not collected'
+            }
+        }
+    }
+
+    try {
+        $jsonStart = $childOutput.IndexOf('{')
+        $jsonEnd = $childOutput.LastIndexOf('}')
+        if ($jsonStart -lt 0 -or $jsonEnd -lt $jsonStart) {
+            throw 'No JSON payload was found in the SharePoint child output.'
+        }
+
+        $jsonPayload = $childOutput.Substring($jsonStart, $jsonEnd - $jsonStart + 1)
+        $result = $jsonPayload | ConvertFrom-Json -ErrorAction Stop
+        $script:SharePointChildCollectionSucceeded = ([string]$result.Status -ne 'not collected')
+        return $result
+    }
+    catch {
+        return [ordered]@{
+            Status                  = 'not collected'
+            Reason                  = "SharePoint child process did not return valid JSON output: $($_.Exception.Message). Raw output: $childOutput"
+            ExternalSharingLevel    = 'not collected'
+            DefaultSharingLinkType  = 'not collected'
+            RestrictedSearchEnabled = 'not collected'
+            TotalSiteCount          = 'not collected'
+            Truncated               = 'not collected'
+            Sites                   = @()
+            OneDriveCoveragePercent = 'not collected'
+            InactiveSiteCount       = 'not collected'
+            OversharingSignals      = [ordered]@{
+                Status                        = 'not collected'
+                CollectionMethod              = 'not collected'
+                CollectionScope               = 'not collected'
+                CollectionPathUsed            = 'not collected'
+                CollectionReason              = 'not collected'
+                RequiredForReliableCollection = 'not collected'
+                DocumentationNote             = 'not collected'
+                SampledAnyoneLinkCount        = 'not collected'
+                SampledOrgWideLinkCount       = 'not collected'
+                SitesWithAnyoneLinksCount     = 'not collected'
+            }
+        }
+    }
+}
+
+function Get-SharePointOneDriveReadinessLocal {
     param([switch]$Sample, [int]$Max = 200)
 
     $tenant = $null
@@ -2484,11 +3089,19 @@ function Get-AdoptionSignals {
     }
 
     $copilot = Get-CopilotUsageSnapshot -Period 'D30'
+    $copilotReported = ([string](Get-ObjectPropertyValue -InputObject $copilot -Name 'Status' -Default 'not collected') -eq 'reported')
+    $copilotReason = [string](Get-ObjectPropertyValue -InputObject $copilot -Name 'Reason' -Default '')
 
     if ($null -eq $latest) {
+        $status = if ($copilotReported) { 'partial' } else { 'not collected' }
+        $reason = 'Office 365 active user report was unavailable.'
+        if (-not $copilotReported -and -not [string]::IsNullOrWhiteSpace($copilotReason)) {
+            $reason = "$reason Copilot usage was not collected: $copilotReason"
+        }
+
         return [ordered]@{
-            Status                  = if ($copilot.Status -eq 'reported') { 'partial' } else { 'not collected' }
-            Reason                  = if ($copilot.Status -eq 'reported') { 'Office 365 active user report was unavailable.' } else { 'Office 365 active user report was unavailable.' }
+            Status                  = $status
+            Reason                  = $reason
             ActiveUsers30Days      = 'not collected'
             TeamsActiveUsers       = 'not collected'
             SharePointActiveUsers  = 'not collected'
@@ -2503,9 +3116,20 @@ function Get-AdoptionSignals {
         }
     }
 
+    $status = if ($copilotReported) { 'reported' } else { 'partial' }
+    $reason = if ($copilotReported) {
+        ''
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($copilotReason)) {
+        "Copilot usage was not collected: $copilotReason"
+    }
+    else {
+        'Copilot usage was not collected.'
+    }
+
     return [ordered]@{
-        Status                  = 'reported'
-        Reason                  = ''
+        Status                  = $status
+        Reason                  = $reason
         # Per Microsoft Graph, this report returns active-user counts for a report date within the
         # requested report period. This script uses the latest available row as the current adoption snapshot.
         ActiveUsers30Days      = Get-ActiveUserCountFromRow -Row $latest -CandidateNames @('office365', 'office 365')
@@ -2752,6 +3376,7 @@ function Get-SearchSemanticAdvanced {
 
 function Get-EndpointAppAdvanced {
     $hasDeviceReadPermission = Test-GraphPermissionsAvailable -RequiredPermissions @('DeviceManagementManagedDevices.Read.All')
+    $hasReportsReadPermission = Test-GraphPermissionsAvailable -RequiredPermissions @('Reports.Read.All')
     $managedDevices = @()
     if ($hasDeviceReadPermission) {
         $managedDevices = @((Get-GraphRestAll -Uri 'https://graph.microsoft.com/v1.0/deviceManagement/managedDevices' -Query @{ '$select' = 'id,complianceState,operatingSystem' }))
@@ -2760,25 +3385,50 @@ function Get-EndpointAppAdvanced {
     $compliant = @($managedDevices | Where-Object { $_.PSObject.Properties.Name -contains 'ComplianceState' -and $_.ComplianceState -eq 'compliant' }).Count
     $windows = @($managedDevices | Where-Object { $_.PSObject.Properties.Name -contains 'OperatingSystem' -and $_.OperatingSystem -match 'Windows' }).Count
 
-    $appsReport = @(Get-GraphReportRows -Uri "https://graph.microsoft.com/v1.0/reports/getM365AppUserCounts(period='D30')")
+    $appsReport = if ($hasReportsReadPermission) {
+        @(Get-GraphReportRows -Uri "https://graph.microsoft.com/v1.0/reports/getM365AppUserCounts(period='D30')")
+    }
+    else {
+        @()
+    }
 
     if (-not $managedDevicesReadable -and @($appsReport).Count -eq 0) {
+        $reasonParts = [System.Collections.Generic.List[string]]::new()
+        if (-not $hasDeviceReadPermission) {
+            $reasonParts.Add('Device management signal is unavailable because Graph permission DeviceManagementManagedDevices.Read.All is missing.') | Out-Null
+        }
+        else {
+            $reasonParts.Add('Device management data could not be collected from managedDevices.') | Out-Null
+        }
+
+        if (-not $hasReportsReadPermission) {
+            $reasonParts.Add('M365 Apps report data is unavailable because Graph permission Reports.Read.All is missing.') | Out-Null
+        }
+        else {
+            $reasonParts.Add('M365 Apps report data was unavailable.') | Out-Null
+        }
+
         return [ordered]@{
             Status                = 'not collected'
-            Reason                = 'Neither device compliance nor M365 Apps report data was collected.'
+            Reason                = ($reasonParts -join ' ')
             ManagedDeviceCount    = 'not collected'
             CompliantDeviceCount  = 'not collected'
             WindowsDeviceCount    = 'not collected'
             DeviceCompliancePercent = 'not collected'
-            M365AppReportAvailable = 'not collected'
+            M365AppReportAvailable = if ($hasReportsReadPermission) { $false } else { 'not collected' }
             DeviceManagementSignal = if (-not $hasDeviceReadPermission) { 'not collected (missing Graph permission: DeviceManagementManagedDevices.Read.All)' } else { 'not collected (requires DeviceManagement managedDevices read permissions)' }
             BrowserReadinessSignal = 'not collected'
         }
     }
 
+    $endpointReason = 'Browser readiness signal was not collected.'
+    if (-not $hasDeviceReadPermission) {
+        $endpointReason = "Device management signal is unavailable because Graph permission DeviceManagementManagedDevices.Read.All is missing. $endpointReason"
+    }
+
     return [ordered]@{
         Status = 'partial'
-        Reason = 'Browser readiness signal was not collected.'
+        Reason = $endpointReason
         ManagedDeviceCount = if ($managedDevicesReadable) { @($managedDevices).Count } else { 'not collected' }
         CompliantDeviceCount = if ($managedDevicesReadable) { $compliant } else { 'not collected' }
         WindowsDeviceCount = if ($managedDevicesReadable) { $windows } else { 'not collected' }
@@ -2831,7 +3481,7 @@ function Get-AppGovernanceAdvanced {
     if (-not (Test-GraphPermissionsAvailable -RequiredPermissions @('Directory.Read.All'))) {
         return [ordered]@{
             Status = 'not collected'
-            Reason = 'Missing Graph permission: Directory.Read.All'
+            Reason = 'Missing Graph permission: Directory.Read.All. Service principals, OAuth grants, high-risk grants, stale grant signal, and ownerless app signal were not collected.'
             ServicePrincipalCount = 'not collected'
             OAuthGrantCount = 'not collected'
             HighRiskGrantCount = 'not collected'
@@ -2847,12 +3497,21 @@ function Get-AppGovernanceAdvanced {
     $servicePrincipals = @((Get-GraphRestAll -Uri 'https://graph.microsoft.com/v1.0/servicePrincipals' -Query @{ '$select' = 'id,appId,displayName,accountEnabled' }))
     $oauthGrants = @((Get-GraphRestAll -Uri 'https://graph.microsoft.com/v1.0/oauth2PermissionGrants'))
 
-    $highScopeGrants = @($oauthGrants | Where-Object {
-        $_.PSObject.Properties.Name -contains 'scope' -and
-        [string]$_.scope -match 'Mail\.ReadWrite|Files\.ReadWrite\.All|Sites\.FullControl\.All|Directory\.ReadWrite\.All'
-    }).Count
+    $highScopePattern = 'Mail\.ReadWrite|Files\.ReadWrite\.All|Sites\.FullControl\.All|Directory\.ReadWrite\.All'
+    $highScopeGrants = @(
+        $oauthGrants | Where-Object {
+            $_.PSObject.Properties.Name -contains 'scope' -and
+            [string]$_.scope -match $highScopePattern
+        }
+    ).Count
 
-    $graphResourceSp = @((Get-GraphRestAll -Uri "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=appId eq '00000003-0000-0000-c000-000000000000'" -Query @{ '$select' = 'id,appId,displayName,appRoles' }) | Select-Object -First 1)
+    $graphResourceQuery = @{
+        '$filter' = "appId eq '00000003-0000-0000-c000-000000000000'"
+        '$select' = 'id,appId,displayName,appRoles'
+    }
+    $graphResourceSp = @(
+        Get-GraphRestAll -Uri 'https://graph.microsoft.com/v1.0/servicePrincipals' -Query $graphResourceQuery | Select-Object -First 1
+    )
     $applicationPermissionAssignments = @()
     $appRoleValueById = @{}
 
@@ -2927,13 +3586,17 @@ function Get-ReadinessFlags {
     $spo = $script:Report.SharePointOneDrive
     $ad = $script:Report.AdoptionSignals
 
-    $licPercent = if (Test-HashtableKey -InputObject $lic -Key 'PrereqReadyPercent') { Get-DoubleValue -Value $lic['PrereqReadyPercent'] -Default 0 } else { 0 }
-    $licPercentCollected = (Test-HashtableKey -InputObject $lic -Key 'PrereqReadyPercent') -and (Test-ValueCollected -Value $lic['PrereqReadyPercent'])
-    $totalUsers = if (Test-HashtableKey -InputObject $script:Report.Metadata -Key 'TotalUsers') { Get-IntValue -Value $script:Report.Metadata['TotalUsers'] -Default 0 } else { 0 }
-    $mfaRegisteredCount = if (Test-HashtableKey -InputObject $id -Key 'MfaRegisteredCount') { Get-IntValue -Value $id['MfaRegisteredCount'] -Default 0 } else { 0 }
-    $mfaRegisteredCountCollected = (Test-HashtableKey -InputObject $id -Key 'MfaRegisteredCount') -and (Test-ValueCollected -Value $id['MfaRegisteredCount'])
-    $mfaPopulationUserCount = if (Test-HashtableKey -InputObject $id -Key 'MfaPopulationUserCount') { Get-IntValue -Value $id['MfaPopulationUserCount'] -Default 0 } else { 0 }
-    $activeUsers30DaysValue = if (Test-HashtableKey -InputObject $ad -Key 'ActiveUsers30Days') { $ad['ActiveUsers30Days'] } else { 'not collected' }
+    $licPrereqReadyPercentValue = Get-ObjectPropertyValue -InputObject $lic -Name 'PrereqReadyPercent' -Default 'not collected'
+    $licPercent = if (Test-ValueCollected -Value $licPrereqReadyPercentValue) { Get-DoubleValue -Value $licPrereqReadyPercentValue -Default 0 } else { 0 }
+    $licPercentCollected = Test-ValueCollected -Value $licPrereqReadyPercentValue
+    $totalUsersValue = Get-ObjectPropertyValue -InputObject $script:Report.Metadata -Name 'TotalUsers' -Default 'not collected'
+    $totalUsers = if (Test-ValueCollected -Value $totalUsersValue) { Get-IntValue -Value $totalUsersValue -Default 0 } else { 0 }
+    $mfaRegisteredCountValue = Get-ObjectPropertyValue -InputObject $id -Name 'MfaRegisteredCount' -Default 'not collected'
+    $mfaRegisteredCount = if (Test-ValueCollected -Value $mfaRegisteredCountValue) { Get-IntValue -Value $mfaRegisteredCountValue -Default 0 } else { 0 }
+    $mfaRegisteredCountCollected = Test-ValueCollected -Value $mfaRegisteredCountValue
+    $mfaPopulationUserCountValue = Get-ObjectPropertyValue -InputObject $id -Name 'MfaPopulationUserCount' -Default 'not collected'
+    $mfaPopulationUserCount = if (Test-ValueCollected -Value $mfaPopulationUserCountValue) { Get-IntValue -Value $mfaPopulationUserCountValue -Default 0 } else { 0 }
+    $activeUsers30DaysValue = Get-ObjectPropertyValue -InputObject $ad -Name 'ActiveUsers30Days' -Default 'not collected'
     $mfaDenominator = if ($mfaPopulationUserCount -gt 0) { $mfaPopulationUserCount } else { $totalUsers }
     $mfaPercent = if ($mfaDenominator -gt 0 -and $mfaRegisteredCountCollected) { [math]::Round(($mfaRegisteredCount / $mfaDenominator) * 100, 2) } else { 'not collected' }
     # NOTE: getOffice365ActiveUserCounts returns daily active-user counts by workload within the
@@ -2941,19 +3604,22 @@ function Get-ReadinessFlags {
     # signal, not a tenant-wide unique-user measure across the entire period.
     $activeUserPercent = if ($totalUsers -gt 0 -and (Test-ValueCollected -Value $activeUsers30DaysValue)) { [math]::Round((([double](Get-IntValue -Value $activeUsers30DaysValue -Default 0)) / $totalUsers) * 100, 2) } else { 'not collected' }
 
-    $caEnabledPoliciesCollected = (Test-HashtableKey -InputObject $ca -Key 'EnabledPolicies') -and (Test-ValueCollected -Value $ca['EnabledPolicies'])
-    $caEnabledPolicies = if ($caEnabledPoliciesCollected) { Get-IntValue -Value $ca['EnabledPolicies'] -Default 0 } else { 'not collected' }
-    $govPublished = if ((Test-SectionCollected -SectionData $gov) -and (Test-HashtableKey -InputObject $gov -Key 'SensitivityLabelsPublished') -and (Test-ValueCollected -Value $gov['SensitivityLabelsPublished'])) { Get-IntValue -Value $gov['SensitivityLabelsPublished'] -Default 0 } else { 'not collected' }
-    $spoRestricted = if (Test-HashtableKey -InputObject $spo -Key 'RestrictedSearchEnabled') { $spo['RestrictedSearchEnabled'] } else { 'not collected' }
-    $spoOneDrivePercentCollected = (Test-HashtableKey -InputObject $spo -Key 'OneDrivePersonalSiteSharePercent') -and (Test-ValueCollected -Value $spo['OneDrivePersonalSiteSharePercent'])
-    $spoOneDrivePercent = if ($spoOneDrivePercentCollected) { Get-DoubleValue -Value $spo['OneDrivePersonalSiteSharePercent'] -Default 0 } else { 'not collected' }
-    $spoExternalSharing = if (Test-HashtableKey -InputObject $spo -Key 'ExternalSharingLevel') { [string]$spo['ExternalSharingLevel'] } else { 'not collected' }
+    $caEnabledPoliciesValue = Get-ObjectPropertyValue -InputObject $ca -Name 'EnabledPolicies' -Default 'not collected'
+    $caEnabledPoliciesCollected = Test-ValueCollected -Value $caEnabledPoliciesValue
+    $caEnabledPolicies = if ($caEnabledPoliciesCollected) { Get-IntValue -Value $caEnabledPoliciesValue -Default 0 } else { 'not collected' }
+    $govPublishedValue = Get-ObjectPropertyValue -InputObject $gov -Name 'SensitivityLabelsPublished' -Default 'not collected'
+    $govPublished = if ((Test-SectionCollected -SectionData $gov) -and (Test-ValueCollected -Value $govPublishedValue)) { Get-IntValue -Value $govPublishedValue -Default 0 } else { 'not collected' }
+    $spoRestricted = Get-ObjectPropertyValue -InputObject $spo -Name 'RestrictedSearchEnabled' -Default 'not collected'
+    $spoOneDrivePercentValue = Get-ObjectPropertyValue -InputObject $spo -Name 'OneDrivePersonalSiteSharePercent' -Default 'not collected'
+    $spoOneDrivePercentCollected = Test-ValueCollected -Value $spoOneDrivePercentValue
+    $spoOneDrivePercent = if ($spoOneDrivePercentCollected) { Get-DoubleValue -Value $spoOneDrivePercentValue -Default 0 } else { 'not collected' }
+    $spoExternalSharing = [string](Get-ObjectPropertyValue -InputObject $spo -Name 'ExternalSharingLevel' -Default 'not collected')
 
     return [ordered]@{
         LicencePrereqPercent      = if ($licPercentCollected) { $licPercent } else { 'not collected' }
         MfaRegisteredPercent      = $mfaPercent
         MfaPopulationUserCount    = if ($mfaDenominator -gt 0) { $mfaDenominator } else { 'not collected' }
-        MfaPopulationSource       = if (Test-HashtableKey -InputObject $id -Key 'MfaPopulationSource') { $id['MfaPopulationSource'] } else { 'not collected' }
+        MfaPopulationSource       = Get-ObjectPropertyValue -InputObject $id -Name 'MfaPopulationSource' -Default 'not collected'
         CaPoliciesEnabled         = $caEnabledPolicies
         SensitivityLabelsPublished = if (Test-ValueCollected -Value $govPublished) { ($govPublished -gt 0) } else { 'not collected' }
         RestrictedSearchEnabled   = if (Test-ValueCollected -Value $spoRestricted) { [bool]$spoRestricted } else { 'not collected' }
@@ -2972,6 +3638,10 @@ function Get-ReadinessEvidence {
     $spo = $script:Report.SharePointExposureAdvanced
     $apps = $script:Report.AppGovernanceAdvanced
     $endpoint = $script:Report.EndpointAppAdvanced
+    $scoringModelVar = Get-Variable -Name ScoringModel -Scope Script -ErrorAction SilentlyContinue
+    if ($null -eq $scoringModelVar -or $null -eq $scoringModelVar.Value) {
+        $script:ScoringModel = Get-DefaultScoringModel
+    }
     $scoring = $script:ScoringModel
 
     $advancedMfaCoverage = Get-ObjectPropertyValue -InputObject $identity -Name 'PhishingResistantMfaCoverage' -Default 'not collected'
@@ -3325,17 +3995,10 @@ function Get-PrerequisitesAndGaps {
     $sessionAvailability = [ordered]@{
         GraphAuthenticated = -not [string]::IsNullOrWhiteSpace([string]$script:GraphAccessToken) -or $null -ne $script:MgContext
         TeamsConnected = [bool]$script:TeamsConnected
-        SharePointConnected = $false
+        SharePointConnected = [bool]$script:SharePointChildCollectionSucceeded
         ExchangeConnected = $false
         ComplianceConnected = $false
     }
-
-    try {
-        if (Get-Command Get-PnPConnection -ErrorAction SilentlyContinue) {
-            $sessionAvailability.SharePointConnected = $null -ne (Get-PnPConnection -ErrorAction SilentlyContinue)
-        }
-    }
-    catch {}
 
     try {
         if (Get-Command Get-ConnectionInformation -ErrorAction SilentlyContinue) {
@@ -3474,11 +4137,65 @@ function Get-Recommendations {
 # ============================================================================
 # MAIN
 # ============================================================================
+if ($SharePointCollectionChild) {
+    try {
+        $WarningPreference = 'SilentlyContinue'
+        $InformationPreference = 'SilentlyContinue'
+        $VerbosePreference = 'SilentlyContinue'
+        $DebugPreference = 'SilentlyContinue'
+        $ProgressPreference = 'SilentlyContinue'
+
+        if ([string]::IsNullOrWhiteSpace($SharePointAdminUrl)) {
+            throw 'SharePointAdminUrl is required in child mode.'
+        }
+
+        $null = Import-SilentPnPModule
+        $connectResult = Connect-PnPForSharePointCollection -AdminUrl $SharePointAdminUrl
+        if (-not $connectResult.Succeeded) {
+            throw $connectResult.Reason
+        }
+
+        $childResult = Get-SharePointOneDriveReadinessLocal -Sample:$IncludeSampling -Max $SampleSize
+        $script:SharePointChildCollectionSucceeded = ([string]$childResult.Status -ne 'not collected')
+        $childResult | ConvertTo-Json -Depth 20 -Compress
+    }
+    catch {
+        $script:SharePointChildCollectionSucceeded = $false
+        [ordered]@{
+            Status                = 'not collected'
+            Reason                = "SharePoint child process failed: $($_.Exception.Message)"
+            ExternalSharingLevel  = 'not collected'
+            DefaultSharingLinkType = 'not collected'
+            RestrictedSearchEnabled = 'not collected'
+            TotalSiteCount        = 'not collected'
+            Truncated             = 'not collected'
+            Sites                 = @()
+            OneDriveCoveragePercent = 'not collected'
+            InactiveSiteCount     = 'not collected'
+            OversharingSignals    = [ordered]@{
+                Status                    = 'not collected'
+                CollectionMethod          = 'not collected'
+                CollectionScope           = 'not collected'
+                CollectionPathUsed        = 'not collected'
+                CollectionReason          = 'not collected'
+                RequiredForReliableCollection = 'not collected'
+                DocumentationNote         = 'not collected'
+                SampledAnyoneLinkCount    = 'not collected'
+                SampledOrgWideLinkCount   = 'not collected'
+                SitesWithAnyoneLinksCount = 'not collected'
+            }
+        } | ConvertTo-Json -Depth 20 -Compress
+    }
+
+    exit 0
+}
 try {
     $resolvedOutputPath = Resolve-OutputFilePath -Path $OutputPath
+    Initialize-GraphRuntimeState
     Write-Phase 'Start'
     Write-Step "Starting AI readiness export to '$resolvedOutputPath'..." -Color Yellow
     Write-Reassurance
+    Write-PnPAssemblyStartupGuidance
     if ($IncludeSampling) { Write-Step "Sampling is enabled with SampleSize=$SampleSize." -Color Yellow }
 
     Write-Phase 'Connection Checks'
