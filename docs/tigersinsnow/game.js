@@ -65,7 +65,8 @@
     for (const side of ['american', 'german']) {
       const changes = before ? `Changes today: ${signed(now[side].points - before[side].points)} held points, ${signed(now[side].formations - before[side].formations)} active formations, ${signed(now[side].strength - before[side].strength)} net ${state.ruleset === 'manual' ? 'CP' : 'strength'} (including arrivals, replacements and exits).` :
         'Daily changes unavailable: this older save has no starting-day totals.';
-      const text = `End of ${15 + state.turn} December: ${now[side].points} held-objective points, ${now[side].formations} active formations, ${now[side].strength} ${state.ruleset === 'manual' ? 'CP' : 'strength'}. ${changes}`;
+      const pointLabel = aidCard.active(state) ? 'occupied town award' : 'held-objective points';
+      const text = `End of ${15 + state.turn} December: ${now[side].points} ${pointLabel}, ${now[side].formations} active formations, ${now[side].strength} ${state.ruleset === 'manual' ? 'CP' : 'strength'}. ${changes}`;
       state.daySummary[side] = text;
       reportOperation(state, side, text);
     }
@@ -413,13 +414,16 @@
     })[0];
     const exitOpen = tile => tile.exit && !occupant(state, tile) && !enemiesNear(state, tile, 'german');
     const exitTarget = nearest(exits.filter(exitOpen)) || nearest(exits);
-    // Exit VP is CP × (16 − turn) / 4. Turns 1–4 stay on the towns so an opening rush cannot farm that multiplier.
-    const allowExits = !weak && state.turn >= 5;
+    // Exit VP is a one-time CP × (16 − turn) / 4 award. Turns 1–4 never take it.
+    // Later turns take it only after Bastogne, Marche and Rochefort are all occupied;
+    // leaving those towns empty to chase an exit gives the positional award away.
+    const townsHeld = towns.length > 0 && towns.every(germanOn);
+    const allowExits = !weak && state.turn >= 5 && townsHeld;
     if (allowExits && current.exit && !enemiesNear(state, current, unit.side)) return null;
     const bastogneClose = bastogne && !germanOn(bastogne) && distance(unit, bastogne) <= 3;
     let target = townTarget || nearest(towns) || exitTarget;
     if (weak) target = nearest(towns.filter(germanOn)) || nearest(towns) || target;
-    // Formations still beside an unheld Bastogne keep attacking it. Everyone else, from turn 5, takes an open exit.
+    // Formations still beside an unheld Bastogne keep attacking it. Once every key town is occupied, the rest take an open exit.
     else if (allowExits && exitTarget && !bastogneClose) target = exitTarget;
     else if (townTarget) target = townTarget;
     const scarceFuel = state.resourceVersion === 1 ? manualRules.provisional.scarceFuel : 35;
@@ -568,7 +572,7 @@
           }
           const arrived = state.map[key(unit.x, unit.y)];
           const blown = state.log[0] && state.log[0].includes('BRIDGE BLOWN');
-          return { side, id: unit.id, path: [from, ...order.path],
+          return { side, id: unit.id, path: traveledPath(from, order.path, unit),
             text: blown ? state.log[0] :
               `${unit.name} moves to column ${arrived.col + 1}, row ${arrived.row + 1} to ${order.reason}.` };
         }
@@ -624,6 +628,14 @@
     } else finishClassicDay(state, 'german');
     return { side, text: state.winner ? `${state.winner.toUpperCase()} wins. Review the final situation below.` :
       `Both armies completed the day. ${15 + state.turn} December orders are ready.`, dayEnd: true };
+  }
+  function traveledPath(from, planned, unit) {
+    const path = [from];
+    for (const tile of planned || []) {
+      path.push(tile);
+      if (tile.x === unit.x && tile.y === unit.y) break;
+    }
+    return path;
   }
   function deserialize(text) {
     if (typeof text !== 'string' || text.length > 200000) throw new Error('Save file is too large.');
@@ -727,7 +739,7 @@
   const context = canvas.getContext('2d');
   const $ = id => document.getElementById(id);
   const freshSeed = () => crypto.getRandomValues(new Uint32Array(1))[0];
-  let state = createGame(freshSeed(), 'manual'), commandSide = 'german', selected = 'g1', mode = 'move', busy = false;
+  let state = createGame(freshSeed(), 'manual'), commandSide = 'german', selected = null, mode = 'move', busy = false;
   let actionVisual = null;
   let visualStarted = 0, animationFrame = null;
   function setActionVisual(value) {
@@ -747,6 +759,53 @@
   const COMMAND_SIDE_KEY = 'winter-offensive-command-side';
   const moveHistory = [];
   let lastReportPhase = null;
+  const typeIcon = symbol => ({ '=': 'armour', X: 'infantry', P: 'airborne', M: 'mech' }[symbol] || 'infantry');
+  function paintStaticIcons() {
+    document.querySelectorAll('[data-icon]').forEach(slot => {
+      if (!slot.querySelector('svg')) slot.innerHTML = PanelIcons.icon(slot.dataset.icon);
+    });
+  }
+  function meterLevel(value, max, lowAt = 0.35) {
+    if (!(max > 0) || value <= 0) return 'out';
+    return value / max < lowAt ? 'low' : 'ok';
+  }
+  function setMeter(id, value, max, label, lowAt) {
+    const meter = $(id);
+    if (!meter) return;
+    const pct = max > 0 ? Math.max(0, Math.min(100, value / max * 100)) : 0;
+    meter.querySelector('span').style.width = `${pct}%`;
+    meter.dataset.level = meterLevel(value, max, lowAt);
+    meter.setAttribute('aria-valuenow', String(Math.round(value)));
+    meter.setAttribute('aria-valuemax', String(Math.round(max)));
+    meter.setAttribute('aria-label', label);
+  }
+  function setPips(filled, total) {
+    const box = $('movement-pips');
+    const shown = Math.min(12, Math.max(1, total || 0));
+    const on = total > 0 ? Math.round(Math.max(0, filled) / total * shown) : 0;
+    box.replaceChildren(...Array.from({ length: shown }, (_, index) => {
+      const pip = document.createElement('i');
+      if (index < on) pip.className = 'on';
+      return pip;
+    }));
+    box.setAttribute('aria-label', `${filled} of ${total} movement points remaining`);
+  }
+  function setTug(score, target) {
+    const span = Math.max(Number(target) * 2, Math.abs(Number(score)) + Number(target), 8);
+    const min = -span * 0.35, max = span;
+    const pos = value => `${Math.max(2, Math.min(98, (value - min) / (max - min) * 100))}%`;
+    $('tug-marker').style.left = pos(Number(score));
+    $('tug-target').style.left = pos(Number(target));
+    $('tug-goal-label').textContent = String(target);
+    $('tug').setAttribute('aria-label', `Net score ${score}. German victory begins at ${target}, marked on the bar.`);
+  }
+  function iconSpan(name) {
+    const slot = document.createElement('span');
+    slot.className = 'ico';
+    slot.setAttribute('aria-hidden', 'true');
+    slot.innerHTML = PanelIcons.icon(name);
+    return slot;
+  }
   function showPhaseReport() {
     if (!manualRules.supplement(state) || busy) return;
     const report = manualRules.phaseReport(state);
@@ -754,8 +813,17 @@
     $('phase-report-armies').replaceChildren();
     for (const army of report.armies) {
       const row = document.createElement('tr');
-      for (const value of [army.side === 'american' ? 'Allied' : 'German', army.supply, army.victory, army.artillery, army.fuel ?? 'N/A']) {
-        const cell = document.createElement('td'); cell.textContent = String(value); row.append(cell);
+      const figures = [
+        [army.side === 'american' ? 'flag' : 'flag', army.side === 'american' ? 'Allied' : 'German'],
+        ['crate', army.supply], ['star', army.victory], ['cannon', army.artillery], ['fuel', army.fuel ?? 'None']
+      ];
+      for (const [name, value] of figures) {
+        const cell = document.createElement('td');
+        const figure = document.createElement('span');
+        figure.className = 'report-figure';
+        figure.append(iconSpan(name), document.createTextNode(String(value)));
+        cell.append(figure);
+        row.append(cell);
       }
       $('phase-report-armies').append(row);
     }
@@ -788,8 +856,32 @@
   function renderSideReports() {
     for (const side of ['american', 'german']) {
       const summary = armySummary(state, side);
-      $(`${side}-army-summary`).textContent = `${summary.formations} active formations / ${summary.strength} ${state.ruleset === 'manual' ? 'combat points' : 'strength'} / ${summary.isolated} isolated`;
-      $(`${side}-objectives`).textContent = summary.objectives.length ? `Holding: ${summary.objectives.join(', ')}.` : 'Holding no objectives.';
+      const units = state.units.filter(unit => unit.side === side && unit.hp > 0 && !unit.exited);
+      const full = units.reduce((sum, unit) => sum + unit.maxHp, 0);
+      const summaryBox = $(`${side}-army-summary`);
+      summaryBox.replaceChildren();
+      summaryBox.className = 'army-meters';
+      const formations = document.createElement('span');
+      formations.className = 'chip';
+      formations.dataset.level = 'ok';
+      formations.append(iconSpan('infantry'), document.createTextNode(`${summary.formations} formations`));
+      const strength = document.createElement('span');
+      strength.className = 'report-figure';
+      strength.append(iconSpan('swords'), document.createTextNode(`${summary.strength}`));
+      const bar = document.createElement('span');
+      bar.className = 'meter';
+      bar.dataset.level = meterLevel(summary.strength, full);
+      bar.setAttribute('role', 'meter');
+      bar.setAttribute('aria-label', `${summary.strength} of ${full} combat points remaining`);
+      const fill = document.createElement('span');
+      fill.style.width = `${full > 0 ? Math.round(summary.strength / full * 100) : 0}%`;
+      bar.append(fill);
+      const isolated = document.createElement('span');
+      isolated.className = 'chip';
+      isolated.dataset.level = summary.isolated ? 'out' : 'ok';
+      isolated.append(iconSpan('crate'), document.createTextNode(summary.isolated ? `${summary.isolated} isolated` : 'Supplied'));
+      summaryBox.append(formations, strength, bar, isolated);
+      $(`${side}-objectives`).textContent = summary.objectives.length ? `Holding: ${summary.objectives.join(', ')}.` : 'Holding no towns.';
       const list = $(`${side}-reports`);
       list.replaceChildren();
       const events = state.reports?.[side] || [];
@@ -857,8 +949,8 @@
       if (state.ruleset === 'manual') mode = state.orderPhase === 'combat' ? 'attack' : 'move';
     }
   } catch { message('Saved campaign could not be loaded. A new campaign is ready.'); }
-  const restoredSelection = state.units.find(unit => unit.id === selected);
-  if (restoredSelection) cursor = { x: restoredSelection.x, y: restoredSelection.y };
+  if (state.ruleset === 'manual') mode = state.orderPhase === 'combat' ? 'attack' : 'move';
+  chooseSelection(true);
   const center = tile => state.referenceVersion === 2 ? referenceMap.center(tile) :
     { x: 30 + tile.x * 23, y: 31 + tile.y * 40 };
   function hex(tile, inset = 0) {
@@ -977,6 +1069,8 @@
     context.fillStyle = paper; context.fillRect(0, 0, canvas.width, canvas.height);
     context.font = '12px Consolas, monospace'; context.textAlign = 'center'; context.textBaseline = 'middle';
     const unit = state.units.find(candidate => candidate.id === selected);
+    const attackTargets = !observing() && mode === 'attack' ? validTargets(state, unit) : [];
+    const focusTarget = attackTargets[0] || null;
     const options = mode === 'move' && !observing() ? reachable(state, unit) : new Map();
     for (const tile of Object.values(state.map)) {
       const point = center(tile);
@@ -1044,8 +1138,20 @@
       context.font = '10px Consolas, monospace'; context.fillText(`${shownCp(counter)}/${counter.mp}`, point.x, point.y + 7);
       if (counter.id === selected) { context.strokeStyle = palette.highlight; context.lineWidth = 2; hex(counter, 1); context.stroke(); }
       if (!counter.supplied) { context.fillStyle = palette.highlight; context.fillText('!', point.x + 20, point.y); }
-      if (!observing() && mode === 'attack' && validTargets(state, unit).includes(counter)) {
-        context.strokeStyle = palette.german; context.lineWidth = 2; context.strokeRect(point.x - 20, point.y - 16, 40, 32);
+      if (attackTargets.includes(counter)) {
+        const primary = focusTarget && counter.id === focusTarget.id;
+        context.strokeStyle = primary ? palette.highlight : palette.german;
+        context.lineWidth = primary ? 4 : 2;
+        context.strokeRect(point.x - 20, point.y - 16, 40, 32);
+        if (primary) {
+          context.font = 'bold 11px Consolas, monospace';
+          const badge = 'NEXT';
+          const badgeWidth = context.measureText(badge).width + 8;
+          context.fillStyle = paper;
+          context.fillRect(point.x - badgeWidth / 2, point.y - 34, badgeWidth, 14);
+          context.fillStyle = palette.highlight;
+          context.fillText(badge, point.x, point.y - 27);
+        }
       }
     }
     for (const tile of Object.values(state.map).filter(candidate => candidate.value)) {
@@ -1104,8 +1210,11 @@
     }
     const cursorTile = state.map[key(cursor.x, cursor.y)];
     if (cursorTile) { context.strokeStyle = ink; context.globalAlpha = 0.7; context.lineWidth = 1; hex(cursorTile, 5); context.stroke(); context.globalAlpha = 1; }
+    const labelY = canvas.height - 14;
     context.fillStyle = ink; context.textAlign = 'left'; context.font = '11px Consolas, monospace';
-    context.fillText('WEST / MEUSE', 10, 499); context.textAlign = 'right'; context.fillText('EAST / GERMAN SUPPLY', 720, 499);
+    context.fillText(reference ? 'WEST' : 'WEST / MEUSE', 8, labelY);
+    context.textAlign = 'right';
+    context.fillText(reference ? 'EAST' : 'EAST / GERMAN SUPPLY', canvas.width - 8, labelY);
   }
   function render() {
     $('unit-tooltip').hidden = true;
@@ -1116,7 +1225,7 @@
     $('turn').textContent = `TURN ${state.turn} / ${aidCard.lastTurn(state)}`;
     $('weather').textContent = state.weather.toUpperCase();
     $('seed-status').textContent = state.initialSeed === undefined ? 'LEGACY / SEED UNKNOWN' : `SEED ${state.initialSeed}`;
-    $('score').textContent = aidCard.active(state) ? `${state.score} NET VP` : `${state.score} / 8`;
+    $('score').textContent = '';
     const manual = state.ruleset === 'manual';
     const card = aidCard.active(state);
     const alliedRoster = document.querySelector('.order-of-battle[data-side="american"]');
@@ -1125,23 +1234,35 @@
     $('american-roster').setAttribute('aria-label', card ? 'Allied formations' : 'US formations');
     document.querySelector('.army-report[data-side="american"] h2').textContent = card ? 'ALLIED / WEST' : 'AMERICAN / WEST';
     document.querySelector('.score-army[data-side="american"] h2').textContent = card ? 'ALLIED / WEST' : 'AMERICAN / WEST';
-    const unitLegendLabel = '= Armour / X Infantry / P Airborne or paratroopers / M Mechanised infantry or cavalry';
-    $('unit-legend').setAttribute('aria-label', unitLegendLabel);
     document.querySelector('.army-report[data-side="german"] h2 + p').textContent = card ?
       'Mission: score casualties, marked edge presence, occupied towns and timely exits. Reach a German victory level at the final check.' :
       'Mission: concentrate westward, keep supply open and capture at least eight points. Adapted Manual rules also reward exits.';
     document.querySelector('.army-report[data-side="american"] h2 + p').textContent = card ?
       'Mission: inflict German casualties, deny town and exit awards, and gain points at marked eastern positions.' :
       'Mission: hold the western objectives, delay the offensive and deny Germany eight points at the final check.';
+    const heldCaption = card ? 'occupied town award' : 'held-objective points';
     for (const side of ['american', 'german']) {
       const summary = armySummary(state, side);
       $(`${side}-held-points`).textContent = String(summary.objectivePoints);
+      $(`${side}-held-caption`).textContent = heldCaption;
       $(`${side}-score-formations`).textContent = String(summary.formations);
       $(`${side}-score-strength`).textContent = String(summary.strength);
+      const sideUnits = state.units.filter(unit => unit.side === side && unit.hp > 0 && !unit.exited);
+      const sideFull = sideUnits.reduce((sum, unit) => sum + unit.maxHp, 0);
+      setMeter(`${side}-army-meter`, summary.strength, sideFull, `${summary.strength} of ${sideFull} combat points remaining`);
       $(`${side}-score-isolated`).textContent = String(summary.isolated);
+      $(`${side}-score-isolated`).dataset.level = summary.isolated ? 'out' : 'ok';
       $(`${side}-strength-label`).textContent = manual ? 'Combat points remaining' : 'Strength remaining';
     }
+    $('held-note').textContent = card ?
+      'These figures are the towns each army occupies right now (Bastogne 50, Marche and Rochefort 25). They are not the victory score. Victory is cumulative German VP minus Allied VP, shown below. Germany is on course once that net score reaches 700 (325 in the short scenario).' :
+      'These figures are the objective points each army holds right now. Germany needs 8 at the final check, and only if a German formation is still in play.';
     const standing = campaignStanding(state);
+    $('score').textContent = card ? String(standing.points) : `${state.score} / 8`;
+    setTug(standing.points, standing.target);
+    $('score-explain').textContent = card ?
+      `German victory points minus Allied victory points. Germany is on course at ${standing.target} or more${state.scenario === 'short' ? ' in this short scenario' : ''}. A positive score favors Germany. A negative score favors the Allies.` :
+      'Objective points Germany holds right now. Germany needs 8 at the final check, and a German formation still in play.';
     $('campaign-points').textContent = `${standing.points} / ${standing.target}`;
     $('campaign-leader').textContent = standing.status;
     $('campaign-leader').dataset.side = standing.leader;
@@ -1165,11 +1286,25 @@
       $(`${side}-day-summary`).textContent = state.daySummary?.[side] ||
         `${side === 'american' ? 'America' : 'Germany'}: the first day has not finished yet.`;
     }
-    $('ruleset-status').textContent = card ? 'MANUAL / PLAYER-AID RULES' :
+    $('ruleset-status').hidden = false;
+    $('seed-status').hidden = false;
+    $('ruleset-status').textContent = card ? `MANUAL / PLAYER-AID / G${state.ratings.german} A${state.ratings.american}` :
       manual ? 'MANUAL-BASED ADAPTATION' : 'CLASSIC RULES';
     $('manual-command').hidden = !manual;
+    const playerAttacking = manual && !observing() && state.playMode !== 'hotseat' &&
+      state.orderPhase === 'combat' && state.phase === commandSide && !state.pendingDefense;
+    $('computer-defense').hidden = !manual || observing() || state.playMode === 'hotseat' || playerAttacking;
     if (manual) {
-      $('resources').textContent = `Supply ${state.generalSupply[commandSide]} / Artillery ${state.artillery[commandSide]} / German fuel ${state.fuel}`;
+      $('supply-label').textContent = commandSide === 'german' ? 'German supply' : 'Allied supply';
+      $('supply-pool').textContent = String(state.generalSupply[commandSide]);
+      $('artillery-pool').textContent = String(state.artillery[commandSide]);
+      $('fuel-pool').textContent = String(state.fuel);
+      const ceilings = manualRules.resourceProfile(state);
+      setMeter('supply-meter', state.generalSupply[commandSide], ceilings.supply[commandSide],
+        `${state.generalSupply[commandSide]} supply remaining of ${ceilings.supply[commandSide]}`);
+      setMeter('artillery-meter', state.artillery[commandSide], ceilings.artillery[commandSide],
+        `${state.artillery[commandSide]} artillery points remaining of ${ceilings.artillery[commandSide]}`);
+      setMeter('fuel-meter', state.fuel, ceilings.fuel, `${state.fuel} German fuel remaining of ${ceilings.fuel}`, 0.2);
       $('defense-strategy').value = state.defenseStrategy;
       $('defense-strategy').disabled = observing() || busy;
     }
@@ -1181,13 +1316,35 @@
     }
     $('end-turn').textContent = manual && state.orderPhase === 'movement' ? 'End Movement' : manual ? 'End Combat / Day' : 'End Turn';
     const unit = state.units.find(candidate => candidate.id === selected);
-    $('unit-name').textContent = unit ? unit.name : 'No unit selected';
-    $('unit-kind').textContent = unit ? `${unit.nationality === 'british' ? 'BRITISH / ALLIED' : unit.side.toUpperCase()} / ${unitPresentation(unit).label.toUpperCase()}` : 'GERMAN COMMAND';
+    $('unit-title').textContent = unit ? unit.name : 'No unit selected';
+    $('unit-type-icon').innerHTML = PanelIcons.icon(unit ? typeIcon(unitPresentation(unit).symbol) : 'infantry');
+    $('next-icon').innerHTML = PanelIcons.icon(manual && state.orderPhase === 'combat' ? 'swords' : 'track');
+    $('unit-kind').textContent = unit ? `${unit.nationality === 'british' ? 'British / Allied' : unit.side === 'german' ? 'German' : 'US'} ${unitPresentation(unit).label.toLowerCase()}` : '';
     $('strength').textContent = unit ? `${shownCp(unit)} / ${shownMax(unit)}` : '-';
-    $('movement').textContent = unit ? String(unit.mp) : '-';
-    $('supply').textContent = unit ? manual ? manualRules.localSupply(state, unit).toUpperCase() : unit.supplied ? 'CONNECTED' : 'ISOLATED' : '-';
+    if (unit) setMeter('strength-meter', shownCp(unit), shownMax(unit), `${shownCp(unit)} of ${shownMax(unit)} combat points`);
+    $('strength-hint').textContent = unit ? 'Fighting power now, out of full strength.' : '';
+    const openingMoveBan = Boolean(unit && state.turn === 1 && unit.side === 'german' && state.phase === 'german');
+    $('movement').textContent = unit ? `${unit.mp} / ${unit.mobility}` : '-';
+    setPips(unit ? unit.mp : 0, unit ? unit.mobility : 0);
+    $('movement-hint').textContent = !unit ? '' :
+      openingMoveBan ? 'Opening day, 16 December: Germany cannot move. This formation can only attack.' :
+      manual && state.orderPhase === 'combat' ? 'Movement is closed. It opens again with the next day.' :
+      unit.mp === 0 ? 'No movement points left for this phase.' :
+      `${unit.mp} movement points left out of ${unit.mobility}.`;
+    const supplyWord = unit ? manual ? manualRules.localSupply(state, unit) : unit.supplied ? 'supplied' : 'isolated' : '';
+    $('supply').textContent = supplyWord ? supplyWord.charAt(0).toUpperCase() + supplyWord.slice(1) : '-';
+    $('supply').dataset.level = supplyWord === 'supplied' || supplyWord === 'connected' ? 'ok' : supplyWord === 'limited' ? 'low' : supplyWord ? 'out' : 'out';
     $('supply').dataset.status = unit ? unit.supplied ? 'connected' : 'isolated' : '';
-    $('combat').textContent = unit ? `${unit.fired ? 'COMMITTED' : 'AVAILABLE'}${manual ? ` / readiness ${unit.readiness}/7` : ''}` : '-';
+    $('supply-hint').textContent = !unit ? '' :
+      supplyWord === 'supplied' ? 'Full combat effect. Friends or an open side keep the supply line.' :
+      supplyWord === 'limited' ? 'Fights and moves at about three quarters. One friendly unit is nearby, but the position is tight.' :
+      'Cannot attack, and fights at half effect. Open a gap or bring a friendly unit alongside.';
+    $('combat').textContent = unit ? manual ? `${unit.readiness} / 7` : unit.fired ? 'Spent' : 'Ready' : '-';
+    if (unit && manual) setMeter('readiness-meter', unit.readiness, 7, `Readiness ${unit.readiness} of 7`);
+    $('readiness-hint').textContent = !unit ? '' :
+      !manual ? (unit.fired ? 'This formation has already attacked today.' : 'This formation has not attacked today.') :
+      unit.fired ? `Already attacked today. Readiness ${unit.readiness} of 7 still adds ${unit.readiness * 10}% in a later fight.` :
+      `Each point adds 10% in combat. ${unit.readiness} of 7 adds ${unit.readiness * 10}%. Moving spends readiness.`;
     for (const command of ['move', 'attack', 'end-turn']) {
       $(command).disabled = observing() || busy || Boolean(state.winner) || Boolean(state.pendingBattle || state.pendingDefense) || (command !== 'end-turn' && (!unit || unit.hp <= 0 || unit.exited)) ||
         (manual && command !== 'end-turn' && (command === 'move' ? state.orderPhase !== 'movement' : state.orderPhase !== 'combat'));
@@ -1199,10 +1356,18 @@
     }
     const moveReason = orderReason(state, unit, 'move'), attackReason = orderReason(state, unit, 'attack');
     const targets = validTargets(state, unit);
-    $('order-guidance').textContent = observing() ? moveReason :
-      `Move: ${moveReason || 'click a dotted destination; movement is allowed.'} Attack: ${attackReason ||
-        (targets.length ? `eligible targets: ${targets.map(target => target.name).join(', ')}. Choose Attack, then click a target for a risk preview.` :
-          'no adjacent eligible enemy. Move closer or end the current phase.')}`;
+    const opening = state.turn === 1 && state.phase === 'german' && state.orderPhase === 'combat';
+    const nextName = targets[0] ? targets[0].name : '';
+    const also = targets.slice(1).map(target => target.name);
+    $('order-guidance').textContent = observing() ? 'Spectator mode. Use Play, Next Action, or Next Day. You can inspect either army, and you cannot give orders.' :
+      state.winner ? 'The campaign is over. The victory score below is final. Start a new campaign to play again.' :
+      state.pendingDefense ? 'The computer is attacking one of your formations. Use the Defend this battle panel on the map, then resolve it.' :
+      state.pendingBattle ? 'Choose where the outlined formation retreats or advances. Directions are 1 to 6. F stops. Stopping a required retreat costs extra strength.' :
+      opening && targets.length ? `Germany cannot move today. Attack with ${unit.name}, outlined in yellow. Click ${nextName}, marked NEXT on the map, to preview the battle.${also.length ? ` ${also.join(' and ')} ${also.length === 1 ? 'is' : 'are'} also beside you.` : ''} Nothing fires until you choose Resolve Attack.` :
+      manual && state.orderPhase === 'combat' && attackReason ? attackReason :
+      manual && state.orderPhase === 'combat' && targets.length ? `Attack with ${unit.name}, outlined in yellow. Click ${nextName}, marked NEXT on the map, to preview the battle.${also.length ? ` ${also.join(' and ')} ${also.length === 1 ? 'is' : 'are'} also beside you.` : ''} Nothing fires until you choose Resolve Attack.` :
+      manual && state.orderPhase === 'combat' ? `${unit ? unit.name : 'This formation'} has no enemy beside it. Select another of your formations, or end combat.` :
+      moveReason || `Move ${unit ? unit.name : 'the selected formation'}. Dotted hexes are legal destinations. Click one. With the map focused, keys 1 to 6 step one hex.`;
     $('move').setAttribute('aria-pressed', String(mode === 'move'));
     $('attack').setAttribute('aria-pressed', String(mode === 'attack'));
     $('undo-move').disabled = observing() || busy || Boolean(state.winner) || moveHistory.length === 0;
@@ -1210,8 +1375,10 @@
     state.units.filter(candidate => candidate.hp > 0 && !candidate.exited).forEach(counter => {
       const button = document.createElement('button');
       button.className = 'roster-unit'; button.setAttribute('aria-pressed', String(counter.id === selected));
-      button.textContent = `${counter.nationality === 'british' ? 'BRITISH ' : ''}[${unitPresentation(counter).symbol}] ${counter.name}`;
-      const stats = document.createElement('span'); stats.textContent = `${shownCp(counter)} / ${counter.mp}`; button.append(stats);
+      const name = document.createElement('span');
+      name.textContent = `${counter.nationality === 'british' ? 'British ' : ''}${counter.name}`;
+      const stats = document.createElement('span'); stats.textContent = `${shownCp(counter)} / ${counter.mp}`;
+      button.append(iconSpan(typeIcon(unitPresentation(counter).symbol)), name, stats);
       button.disabled = busy;
       button.onclick = () => {
         selected = counter.id; cursor = { x: counter.x, y: counter.y };
@@ -1238,7 +1405,9 @@
       list.replaceChildren();
       for (const entry of reinforcementEntries.filter(candidate => candidate.side === side)) {
         const row = document.createElement('li');
-        row.textContent = `${entry.nationality === 'british' ? 'BRITISH / ' : ''}[${unitPresentation(entry).symbol}] ${entry.name} — TURN ${entry.turn} / ${entry.date}${['Scheduled', 'Due after combat'].includes(entry.status) ? '' : ` / ${entry.status}`}`;
+        row.className = 'report-figure';
+        row.append(iconSpan(typeIcon(unitPresentation(entry).symbol)), document.createTextNode(
+          `${entry.nationality === 'british' ? 'British ' : ''}${entry.name} — turn ${entry.turn} / ${entry.date}${['Scheduled', 'Due after combat'].includes(entry.status) ? '' : ` / ${entry.status}`}`));
         list.append(row);
       }
       if (!list.childElementCount) {
@@ -1251,7 +1420,21 @@
     Object.values(state.map).filter(tile => tile.value).forEach(tile => {
       const row = document.createElement('li');
       row.dataset.side = tile.owner;
-      row.textContent = `${tile.name} / ${tile.owner === 'german' ? 'GER' : 'USA'} / ${tile.value} PT — ${tile.name === 'MEUSE' || tile.name === 'DINANT' ? 'western crossing / breakthrough objective' : 'crossroads / defensive anchor'}. Capture to transfer ${tile.value} held points.`;
+      row.className = 'town-card';
+      const flag = iconSpan('flag');
+      const name = document.createElement('strong');
+      name.textContent = tile.name;
+      const badge = document.createElement('span');
+      badge.className = 'vp-badge';
+      badge.append(iconSpan('star'), document.createTextNode(card && tile.sourcePoints ? String(tile.sourcePoints) : String(tile.value)));
+      const holder = tile.owner === 'german' ? 'Germany holds it now' : card ? 'The Allies hold it now' : 'America holds it now';
+      const caption = document.createElement('span');
+      caption.className = 'stat-hint';
+      caption.textContent = card && tile.sourcePoints ?
+        `${holder}. Germany scores ${tile.sourcePoints} each day a German unit stands here.` :
+        `${holder}. Worth ${tile.value} while that side controls it.`;
+      badge.setAttribute('aria-label', `${badge.textContent} victory points`);
+      row.append(flag, name, badge, caption);
       $('objectives').append(row);
     });
     $('dispatches').replaceChildren();
@@ -1305,7 +1488,19 @@
       }
     }
     $('new-game').disabled = busy; $('import').disabled = busy; $('export').disabled = busy;
+    if (!$('action-story').textContent.trim()) {
+      $('action-story').textContent = 'The line under the map describes each move and battle. A click on a dotted hex moves. A click on an outlined enemy opens a preview and does not fire until you resolve it.';
+    }
     automaticPhaseReport();
+  }
+  function chooseSelection(preferAction) {
+    const living = state.units.filter(unit => unit.side === commandSide && unit.hp > 0 && !unit.exited);
+    const current = living.find(unit => unit.id === selected);
+    const canAct = unit => state.ruleset === 'manual' && state.orderPhase === 'combat' ?
+      validTargets(state, unit).length > 0 : reachable(state, unit).size > 0;
+    const unit = (current && (!preferAction || canAct(current)) ? current : null) || living.find(canAct) || current || living[0];
+    selected = unit ? unit.id : null;
+    if (unit) cursor = { x: unit.x, y: unit.y };
   }
   function renderManeuvers() {
     $('defense-panel').hidden = !state.pendingDefense;
@@ -1382,7 +1577,7 @@
       if (move(state, selected, tile.x, tile.y)) {
         const blown = state.log[0] && state.log[0].includes('BRIDGE BLOWN');
         const arrived = state.map[key(unit.x, unit.y)];
-        setActionVisual({ side: unit.side, path: [from, ...option.path] });
+        setActionVisual({ side: unit.side, path: traveledPath(from, option.path, unit) });
         $('action-story').textContent = blown ? state.log[0] :
           `${unit.name} moved along the highlighted route to column ${arrived.col + 1}, row ${arrived.row + 1}. ${unit.mp} movement points remain.`;
         moveHistory.push(previous); message(blown ? state.log[0] : 'Movement complete.'); persist();
@@ -1562,7 +1757,9 @@
         ...(state.playMode === 'hotseat' ? { defenseStrategy: $('plan-defense-strategy').value,
           defensiveArtillery: Number($('plan-defense-artillery').value) } : {})
       });
-      const heading = document.createElement('strong'); heading.textContent = `${preview.odds.toFixed(2)}:1 nominal attack odds`;
+      const heading = document.createElement('strong');
+      heading.className = 'with-icon';
+      heading.append(iconSpan('swords'), document.createTextNode(` ${preview.odds.toFixed(2)}:1 attack odds`));
       const note = document.createElement('p'); note.textContent = 'Actual losses and outcomes may vary.';
       const more = document.createElement('details');
       const summary = document.createElement('summary'); summary.textContent = 'Show combat details';
@@ -1662,12 +1859,14 @@
         endTurn(state, commandSide);
         if (state.playMode === 'hotseat') commandSide = state.playerSide;
         if (state.ruleset === 'manual') mode = state.orderPhase === 'combat' ? 'attack' : 'move';
-        if (!state.units.some(unit => unit.id === selected && unit.side === commandSide && unit.hp > 0 && !unit.exited)) {
-          selected = state.units.find(unit => unit.side === commandSide && unit.hp > 0 && !unit.exited)?.id || null;
-          const unit = state.units.find(unit => unit.id === selected);
-          if (unit) cursor = { x: unit.x, y: unit.y };
-        }
-        persist(); message(state.winner ? 'Campaign complete.' : 'New orders ready.');
+        chooseSelection(true);
+        persist();
+        const actor = commandSide === 'german' ? 'Germany' : aidCard.active(state) ? 'The Allies' : 'America';
+        message(state.winner ? 'Campaign complete.' :
+          state.ruleset !== 'manual' ? 'New orders ready.' :
+          state.playMode === 'hotseat' && state.orderPhase === 'movement' ? `${actor} to move. Pass the browser to that player.` :
+          state.orderPhase === 'combat' ? 'Combat phase. Click an outlined enemy to preview an attack.' :
+          'Movement phase. Click a dotted hex.');
       }
       catch (error) { message(`Turn could not complete: ${error.message}`); }
       finally { busy = false; render(); }
@@ -1742,10 +1941,8 @@
       computerTurn(state, 'german');
       beginSide(state, 'american');
     }
-    selected = state.units.find(unit => unit.side === commandSide && unit.hp > 0)?.id || null;
-    const unit = state.units.find(candidate => candidate.id === selected);
     mode = state.ruleset === 'manual' && state.orderPhase === 'combat' ? 'attack' : 'move';
-    cursor = { x: unit.x, y: unit.y };
+    chooseSelection(true);
     $('restart-dialog').close(); persist(); message(computer ? 'Computer campaign ready. Choose Play or Next Day.' : 'New campaign started.'); render();
     try { localStorage.setItem(COMMAND_SIDE_KEY, commandSide); }
     catch { message('Campaign started, but your command side could not be saved.'); }
@@ -1773,14 +1970,13 @@
       resetSideReports();
       if (state.ruleset === 'manual') commandSide = state.playerSide;
       if (observing()) commandSide = 'german';
-      selected = state.units.find(unit => unit.side === commandSide && unit.hp > 0 && !unit.exited)?.id || null;
-      const importedSelection = state.units.find(unit => unit.id === selected);
-      if (importedSelection) cursor = { x: importedSelection.x, y: importedSelection.y };
       mode = state.ruleset === 'manual' && state.orderPhase === 'combat' ? 'attack' : 'move';
+      chooseSelection(true);
       persist(); message('Campaign restored.'); render();
     } catch (error) { message(`Import failed: ${error.message}`); }
     event.target.value = '';
   };
   new MutationObserver(draw).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  paintStaticIcons();
   render();
 })(typeof globalThis !== 'undefined' ? globalThis : this);
