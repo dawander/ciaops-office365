@@ -86,6 +86,27 @@
     nav a:hover { background: var(--cp-surface-soft); }
     nav a:focus-visible { outline: 3px solid var(--cp-accent); outline-offset: 3px; }
     main { --page-gutter: 28px; margin: auto; padding: 20px var(--page-gutter) 28px; }
+    #who-wins { margin: 0 0 10px; padding: 10px 14px; border: 1px solid var(--cp-border-strong); border-radius: 12px; background: var(--cp-surface); }
+    #who-wins-requirement { margin: 0; font-size: 18px; font-weight: 800; line-height: 1.2; }
+    #who-wins-headline { margin: 4px 0 0; font-size: 22px; font-weight: 800; line-height: 1.25; }
+    #who-wins-meta { margin: 4px 0 8px; font-size: 14px; line-height: 1.35; color: var(--cp-text-muted); }
+    #who-wins[data-ahead="german"] #who-wins-headline { color: var(--cp-danger); }
+    #who-wins[data-ahead="allied"] #who-wins-headline, #who-wins[data-ahead="american"] #who-wins-headline { color: var(--cp-link); }
+    .who-scale { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px; font-size: 15px; font-weight: 700; }
+    #who-allied { color: var(--cp-link); }
+    #who-goal-label { color: var(--cp-text); text-align: center; }
+    #who-german { color: var(--cp-danger); text-align: right; }
+    .who-bar { position: relative; height: 22px; border-radius: 999px; background: var(--cp-danger); overflow: hidden; }
+    .who-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--cp-link); }
+    .who-goal { position: absolute; top: 0; bottom: 0; width: 3px; background: var(--cp-text); transform: translateX(-50%); }
+    #victory-help { margin: 6px 0 0; background: none; border: 0; padding: 0; min-height: 0; color: var(--cp-link); font-weight: 700; text-decoration: underline; }
+    #vp-breakdown { margin-top: 8px; }
+    #vp-breakdown summary { cursor: pointer; font-weight: 700; }
+    #vp-breakdown h3 { margin: 8px 0 4px; font-size: 15px; }
+    #vp-breakdown ul { margin: 0 0 8px; padding-left: 18px; }
+    #victory-explainer table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    #victory-explainer th, #victory-explainer td { padding: 6px 8px; border-bottom: 1px solid var(--cp-border); text-align: left; }
+    #victory-explainer tr[data-current="true"] { background: var(--cp-accent-soft); font-weight: 700; }
     .status { display: flex; flex-wrap: wrap; gap: 20px; padding: 0 0 16px; align-items: center; font: 12px Consolas, monospace; }
     #phase { margin-left: auto; color: var(--cp-accent); font-weight: bold; }
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; align-items: start; }
@@ -197,7 +218,7 @@
     html[data-theme="dark"] .chip[data-level="low"] { background: #78350f; color: #fef3c7; }
     html[data-theme="dark"] .chip[data-level="out"] { background: #7f1d1d; color: #fecaca; }
     .tug-wrap { margin: 8px 0 4px; }
-    .tug { position: relative; height: 16px; border-radius: 999px; background: linear-gradient(90deg, var(--cp-link), #7dd3fc 42%, #fecdd3 58%, var(--cp-danger)); }
+    .tug { position: relative; height: 16px; border-radius: 999px; background: var(--cp-border); }
     .tug .needle, .tug .goal { position: absolute; top: -5px; width: 3px; height: 26px; border-radius: 2px; }
     .tug .needle { background: var(--cp-text); }
     .tug .goal { width: 2px; background: var(--cp-warning); }
@@ -267,6 +288,13 @@
     #reinforcement-schedule-list li[data-side="american"] { border-left-color: var(--cp-link); }
     #reinforcement-schedule-list li[data-side="german"] { border-left-color: var(--cp-danger); }
     #reinforcement-schedule-list li[data-status="Delayed"] { border-left-color: var(--cp-warning); }
+    #advisor { margin-top: 4px; border: 1px solid var(--cp-border); border-radius: 8px; background: var(--cp-surface); overflow: auto; }
+    #advisor[hidden] { display: none; }
+    #advisor > summary { cursor: pointer; padding: 4px 8px; font-size: 13px; font-weight: 700; }
+    #advisor-list { list-style: none; margin: 0; padding: 0 4px 4px; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+    #advisor-list button { width: 100%; display: flex; align-items: flex-start; gap: 6px; text-align: left; min-height: 28px; padding: 2px 6px; font-size: 13px; line-height: 1.3; background: transparent; border: 0; color: inherit; }
+    #advisor-list button:hover, #advisor-list button:focus-visible { background: var(--cp-accent-soft); }
+    #advisor-list .ico { width: 16px; height: 16px; margin-top: 2px; }
     select, input[type="number"] { font: inherit; color: var(--cp-text); background: var(--cp-surface); border: 1px solid var(--cp-border-strong); border-radius: 4px; padding: 8px; max-width: 100%; }
     #manual-command { border-top: 1px solid var(--cp-border); margin-top: 16px; padding-top: 12px; font: 12px/1.6 Consolas, monospace; }
     #manual-command label, #combat-plan label, #restart-dialog label { display: block; margin: 12px 0; }
@@ -336,6 +364,97 @@
       .battlefield-reports, .score-comparison, .roster-columns { grid-template-columns: minmax(0, 1fr); }
       .army-column { grid-row: auto; }
     }
+    .tip { position: relative; }
+    .stat-hint, #score-explain { position: absolute; width: 1px; height: 1px; margin: 0; padding: 8px 10px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: normal; }
+    .tip:hover .stat-hint, .tip:focus-within .stat-hint, .tip.open .stat-hint,
+    .tip:hover #score-explain, .tip:focus-within #score-explain, .tip.open #score-explain {
+      clip: auto; width: min(280px, 70vw); height: auto; z-index: 20; left: 0; top: calc(100% + 4px);
+      border: 1px solid var(--cp-border-strong); border-radius: 8px; background: var(--cp-surface); color: var(--cp-text);
+      box-shadow: var(--cp-shadow); font-size: 14px; line-height: 1.4;
+    }
+    .legend-caption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+    .mission, .history-intro, #held-note { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+    .drawer > summary { cursor: pointer; padding: 6px 2px; font-size: 14px; font-weight: 700; }
+    .drawer > summary:focus-visible { outline: 3px solid var(--cp-accent); outline-offset: 2px; }
+    @media (min-width: 1000px) {
+      html, body { height: auto; min-height: 100%; overflow-x: hidden; overflow-y: auto; }
+      .support-notice { padding: 2px 12px; font-size: 13px; }
+      .masthead { padding: 4px 12px; }
+      .masthead h1 { font-size: 18px; }
+      .subtitle { display: none; }
+      .insignia { padding: 4px 6px; font-size: 16px; }
+      nav a, .masthead button, .orders button { min-height: 32px; padding: 4px 8px; }
+      main { display: block; height: auto; overflow: visible; padding: 8px 0 24px; }
+      #who-wins, .status, .orders, #spectator-controls, .army-compare, #notice, aside.command-bar, #advisor { margin-left: 12px; margin-right: 12px; }
+      #who-wins { margin-bottom: 8px; }
+      .status { padding: 0 0 4px; gap: 12px; font-size: 13px; }
+      .orders { margin-top: 0; margin-bottom: 4px; }
+      #next-step { display: block; padding: 6px 8px; }
+      #next-step h2 { margin: 0 0 2px; font-size: 12px; }
+      aside.command-bar #order-guidance { white-space: normal; overflow: visible; text-overflow: unset; display: block; line-height: 1.35; }
+      .layout { display: flex; flex-direction: column; gap: 8px; overflow: visible; }
+      .layout > section[aria-label="Battlefield"] { order: 1; width: 100%; min-width: 0; }
+      aside.command-bar { order: 2; width: auto; }
+      #advisor { order: 3; }
+      .command-bar .campaign-scoreboard { display: block; margin: 8px 0; padding: 8px; }
+      .map-header { display: none; }
+      .battlefield-reports { display: flex; flex-direction: column; align-items: stretch; gap: 4px; width: 100%; }
+      .battlefield-reports > .army-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; align-items: start; position: relative; z-index: 1; }
+      .battlefield-reports > .map-scroll { width: 100%; align-self: stretch; margin: 0; display: flex; flex-direction: column; overflow: visible; position: relative; z-index: 0; }
+      .army-strip { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 4px; }
+      .army-strip h2 { flex: 0 0 auto; margin: 0; white-space: nowrap; line-height: 1.2; background: var(--cp-surface); position: relative; z-index: 1; }
+      .army-report { margin: 0; padding: 4px 8px; }
+      .army-report h2 { font-size: 13px; }
+      .army-report .army-meters { flex: 1 1 160px; min-width: 0; margin: 0; gap: 4px 8px; }
+      .army-report .army-meters .ico { width: 16px; height: 16px; }
+      .army-report .chip { font-size: 13px; padding: 1px 6px; }
+      .army-report .army-meters .meter { width: 72px; }
+      .army-report .drawer > summary { padding: 2px 0; font-size: 13px; }
+      .legend { position: relative; padding: 2px 12px; gap: 2px 6px; flex-wrap: wrap; }
+      .legend-item { position: relative; min-height: 24px; padding: 0 4px; }
+      .army-report .mission { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+      #battlefield { display: block; width: 100%; height: auto; max-width: none; }
+      #notice { margin: 2px 12px 0; min-height: 0; font-size: 13px; }
+      #action-story { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); padding: 0; border: 0; }
+      .campaign-history, .campaign-scoreboard { max-height: none; }
+      #reinforcement-arrivals { display: none; }
+      #reinforcement-schedule { margin: 4px 12px 0; }
+      #reinforcement-schedule > summary { padding: 4px 8px; }
+      #advisor { max-height: none; }
+      aside.command-bar { margin-top: 0; padding: 8px; gap: 6px; overflow: visible; }
+      .command-cards { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.9fr) minmax(0, 1.15fr); gap: 8px; align-items: start; }
+      .command-drawers { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+      .command-drawers > details { flex: 1 1 220px; min-width: 0; }
+      .unit-card, .resource-card, .score-card { padding: 8px; }
+      .panel-kicker { margin-bottom: 2px; font-size: 12px; }
+      aside.command-bar #unit-name { font-size: 18px; }
+      aside.command-bar dl { grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+      .resource-list { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+      .resource-list strong { font-size: 16px; }
+      .score-figure { font-size: 18px; }
+      .tug { height: 12px; }
+      aside.command-bar #objectives { display: flex; flex-wrap: wrap; gap: 4px; }
+      .town-card { grid-template-columns: 18px minmax(0, 1fr) auto; gap: 4px; padding: 4px; }
+      .town-card .stat-hint { position: absolute; }
+    }
+    @media (max-width: 800px) {
+      html, body { height: auto; overflow-x: hidden; overflow-y: auto; max-width: 100%; }
+      .legend { width: 100%; }
+      body, main, .layout, .layout > section[aria-label="Battlefield"], .battlefield-reports, .map-scroll { display: block; height: auto; overflow: visible; }
+      body { overflow-x: hidden; }
+      .army-compare { display: none; }
+      .support-notice { padding: 4px 8px; font-size: 13px; }
+      .masthead { padding: 6px 8px; }
+      .masthead h1 { font-size: 20px; }
+      .subtitle { display: none; }
+      .legend, main, .layout, .map-scroll { max-width: 100%; }
+      .legend { flex-wrap: wrap; }
+      #battlefield { display: block; width: 100%; height: auto; }
+      #who-wins-requirement { font-size: 16px; }
+      #who-wins-headline { font-size: 18px; }
+      #advisor { max-height: none; }
+      aside.command-bar { position: static; max-height: none; overflow: visible; margin-top: 8px; }
+    }
   </style>
 </head>
 <body>
@@ -345,6 +464,15 @@
     <nav aria-label="Campaign controls"><a href="help.html" target="_blank" rel="noopener" title="Open the player guide and historical background in a new tab">Help &amp; History</a><button id="rules">Rules</button><button id="order-of-battle-button" aria-haspopup="dialog" aria-controls="order-of-battle-dialog">Order of Battle</button><button id="phase-report-button" hidden>Report / R</button><button id="export">Export Save</button><button id="import">Import Save</button><button id="new-game">New Campaign</button></nav>
   </header>
   <main>
+    <section id="who-wins" aria-live="polite" aria-atomic="true" aria-label="Who is winning">
+      <p id="who-wins-requirement">Most points wins. The Allies start with 699 victory points (VP).</p>
+      <p id="who-wins-headline">Allies 700 vs Germany 0: Allies winning by 700</p>
+      <p id="who-wins-meta"></p>
+      <div class="who-scale"><span id="who-allied">Allies 700</span><span id="who-german">Germany 0</span></div>
+      <div id="who-bar" class="who-bar" role="img"><span id="who-fill" class="who-fill"></span><span id="who-goal" class="who-goal" aria-hidden="true"></span></div>
+      <button type="button" id="victory-help">How victory works</button>
+      <details id="vp-breakdown"><summary>Where the points come from</summary><div id="vp-breakdown-body"></div></details>
+    </section>
     <div class="status"><span id="date"></span><span id="turn"></span><span id="weather"></span><span id="ruleset-status"></span><span id="seed-status"></span><span id="phase" role="status"></span></div>
     <div class="orders" role="group" aria-label="Unit orders"><button id="move" aria-pressed="true">Move</button><button id="attack" aria-pressed="false">Attack</button><button id="undo-move" disabled aria-label="Undo Move" title="Undo the last move (before combat or ending the turn)">&#8630; Undo</button><button id="end-turn">End Turn</button></div>
     <section id="spectator-controls" aria-label="Computer versus computer playback" hidden>
@@ -356,8 +484,9 @@
       <section aria-label="Battlefield">
         <div class="map-header"><span class="coordinates"></span></div>
         <div class="battlefield-reports">
-          <div class="army-column">
-            <section class="army-report" data-side="american" aria-label="American situation and reports"><h2>AMERICAN / WEST</h2><p><strong>Mission:</strong> Hold the western objectives, delay the offensive and counterattack exposed formations. Deny Germany eight points at the final check.</p><p id="american-army-summary"></p><p id="american-objectives"></p><ol id="american-reports" aria-label="Recent American operations"></ol></section>
+          <div class="army-compare">
+            <section class="army-report" data-side="american" aria-label="American situation and reports"><div class="army-strip"><h2>AMERICAN / WEST</h2><p id="american-army-summary"></p></div><p class="mission"><strong>Mission:</strong> Hold the western objectives, delay the offensive and counterattack exposed formations. Deny Germany eight points at the final check.</p><details class="drawer"><summary>Allied reports</summary><p id="american-objectives"></p><ol id="american-reports" aria-label="Recent American operations"></ol></details></section>
+            <section class="army-report" data-side="german" aria-label="German situation and reports"><div class="army-strip"><h2>GERMAN / EAST</h2><p id="german-army-summary"></p></div><p class="mission"><strong>Mission:</strong> Concentrate westward, keep supply open, and capture at least eight points. Manual mode also rewards western exits; preserve fuel and combat readiness.</p><details class="drawer"><summary>German reports</summary><p id="german-objectives"></p><ol id="german-reports" aria-label="Recent German operations"></ol></details></section>
           </div>
           <div class="map-scroll">
             <div class="legend" aria-label="Map legend">
@@ -406,9 +535,6 @@
               <ol id="reinforcement-schedule-list"></ol>
             </details>
           </div>
-          <div class="army-column">
-            <section class="army-report" data-side="german" aria-label="German situation and reports"><h2>GERMAN / EAST</h2><p><strong>Mission:</strong> Concentrate westward, keep supply open, and capture at least eight points. Manual mode also rewards western exits; preserve fuel and combat readiness.</p><p id="german-army-summary"></p><p id="german-objectives"></p><ol id="german-reports" aria-label="Recent German operations"></ol></section>
-          </div>
         </div>
         <div id="notice" role="status" aria-live="polite"></div>
         <div id="action-story" aria-live="polite"></div>
@@ -416,12 +542,45 @@
           <h2>REINFORCEMENTS / NEW ON THE MAP</h2>
           <div id="arrival-list"></div>
         </section>
-        <details class="campaign-history">
-          <summary>Campaign History <span id="history-count"></span></summary>
-          <p class="history-intro">Newest events first. The American and German panels beside the map explain current operations; this history keeps up to 60 saved events, including earlier turns.</p>
-          <ol id="dispatches" aria-label="Saved campaign events, newest first"></ol>
-        </details>
       </section>
+      <aside class="command-bar" aria-label="Player command">
+        <section id="next-step" aria-labelledby="next-step-title">
+          <h2 id="next-step-title" class="with-icon"><span id="next-icon" class="ico" aria-hidden="true"></span> What to do next</h2>
+          <p id="order-guidance" aria-live="polite"></p>
+        </section>
+        <div class="command-cards">
+          <section class="unit-card" aria-label="Selected formation">
+            <p class="panel-kicker">Selected formation</p>
+            <h2 id="unit-name" class="with-icon"><span id="unit-type-icon" class="ico" aria-hidden="true"></span><span id="unit-title"></span></h2>
+            <p id="unit-kind"></p>
+            <dl>
+              <div class="tip" tabindex="0"><dt class="stat-head"><span class="ico" data-icon="swords" aria-hidden="true"></span> Combat points</dt><dd id="strength"></dd><div id="strength-meter" class="meter" role="meter" aria-valuemin="0"><span></span></div><p id="strength-hint" class="stat-hint"></p></div>
+              <div class="tip" tabindex="0"><dt class="stat-head"><span class="ico" data-icon="track" aria-hidden="true"></span> Movement</dt><dd id="movement"></dd><div id="movement-pips" class="pips" role="img"></div><p id="movement-hint" class="stat-hint"></p></div>
+              <div class="tip" tabindex="0"><dt class="stat-head"><span class="ico" data-icon="crate" aria-hidden="true"></span> Local supply</dt><dd id="supply" class="chip"></dd><p id="supply-hint" class="stat-hint"></p></div>
+              <div class="tip" tabindex="0"><dt class="stat-head"><span class="ico" data-icon="gauge" aria-hidden="true"></span> Readiness</dt><dd id="combat"></dd><div id="readiness-meter" class="meter" role="meter" aria-valuemin="0" aria-valuemax="7"><span></span></div><p id="readiness-hint" class="stat-hint"></p></div>
+            </dl>
+          </section>
+          <section id="manual-command" class="resource-card" aria-label="Army resources today" hidden>
+            <p class="panel-kicker">Your army today</p>
+            <ul class="resource-list">
+              <li class="tip" tabindex="0"><span id="supply-label" class="resource-label stat-head" title="The shared stock this army spends in battle. At zero, its formations fight at half strength."><span class="ico" data-icon="crate" aria-hidden="true"></span> Supply</span><strong id="supply-pool"></strong><div id="supply-meter" class="meter" role="meter" aria-valuemin="0"><span></span></div><span class="stat-hint">Spent in battle. At zero, this army fights at half strength.</span></li>
+              <li class="tip" tabindex="0"><span class="resource-label stat-head" title="Each point adds 10 combat points to one battle. Unused points are replaced at the start of the next day."><span class="ico" data-icon="cannon" aria-hidden="true"></span> Artillery</span><strong id="artillery-pool"></strong><div id="artillery-meter" class="meter" role="meter" aria-valuemin="0"><span></span></div><span class="stat-hint">Each point adds 10 combat points to one battle. It refills tomorrow.</span></li>
+              <li class="tip" tabindex="0"><span class="resource-label stat-head" title="Only German tanks spend fuel, when they move or attack. The pool is never refilled. Low fuel halves their movement."><span class="ico" data-icon="fuel" aria-hidden="true"></span> German fuel</span><strong id="fuel-pool"></strong><div id="fuel-meter" class="meter" role="meter" aria-valuemin="0"><span></span></div><span class="stat-hint">German tanks spend this to move and attack. It never refills. Low fuel halves their movement.</span></li>
+            </ul>
+          </section>
+          <section class="score-card objectives-section tip" tabindex="0" aria-label="Victory score and towns">
+            <p class="panel-kicker with-icon"><span class="ico" data-icon="star" aria-hidden="true"></span> Victory score</p>
+            <p class="score-figure"><strong id="score"></strong></p>
+            <div class="tug-wrap">
+              <div id="tug" class="tug" role="img"><span id="tug-marker" class="needle"></span><span id="tug-target" class="goal" title="German victory starts here"></span></div>
+              <div class="tug-scale"><span>Allies</span><span id="tug-goal-label">Level</span><span>Germany</span></div>
+            </div>
+            <p id="score-explain"></p>
+            <ul id="objectives"></ul>
+          </section>
+        </div>
+        <div class="command-drawers">
+        <details class="drawer"><summary>Campaign detail</summary>
       <section class="campaign-scoreboard" aria-label="Overall campaign score">
         <h2>CAMPAIGN BALANCE / BOTH ARMIES</h2>
         <div class="score-comparison">
@@ -438,46 +597,18 @@
         <section id="day-summary" aria-label="Last completed day"><h2>LAST COMPLETED DAY</h2><p id="american-day-summary"></p><p id="german-day-summary"></p></section>
         <div class="victory-assessment">
           <div class="campaign-score-heading"><h2 id="victory-rule-title">EXISTING VICTORY RULE / GERMAN SCORE</h2><strong id="campaign-points"></strong><span id="campaign-leader" role="status"></span></div>
-          <progress id="campaign-score-progress" max="8" value="0" aria-label="German progress toward the victory target"></progress>
+          <progress id="campaign-score-progress" max="100" value="0" aria-label="Share of the victory points on the board"></progress>
           <p id="campaign-score-detail"></p><p id="campaign-score-basis"></p>
         </div>
       </section>
-      <aside class="command-bar" aria-label="Player command">
-        <section id="next-step" aria-labelledby="next-step-title">
-          <h2 id="next-step-title" class="with-icon"><span id="next-icon" class="ico" aria-hidden="true"></span> What to do next</h2>
-          <p id="order-guidance" aria-live="polite"></p>
-        </section>
-        <div class="command-cards">
-          <section class="unit-card" aria-label="Selected formation">
-            <p class="panel-kicker">Selected formation</p>
-            <h2 id="unit-name" class="with-icon"><span id="unit-type-icon" class="ico" aria-hidden="true"></span><span id="unit-title"></span></h2>
-            <p id="unit-kind"></p>
-            <dl>
-              <div><dt class="stat-head"><span class="ico" data-icon="swords" aria-hidden="true"></span> Combat points</dt><dd id="strength"></dd><div id="strength-meter" class="meter" role="meter" aria-valuemin="0"><span></span></div><p id="strength-hint" class="stat-hint"></p></div>
-              <div><dt class="stat-head"><span class="ico" data-icon="track" aria-hidden="true"></span> Movement</dt><dd id="movement"></dd><div id="movement-pips" class="pips" role="img"></div><p id="movement-hint" class="stat-hint"></p></div>
-              <div><dt class="stat-head"><span class="ico" data-icon="crate" aria-hidden="true"></span> Local supply</dt><dd id="supply" class="chip"></dd><p id="supply-hint" class="stat-hint"></p></div>
-              <div><dt class="stat-head"><span class="ico" data-icon="gauge" aria-hidden="true"></span> Readiness</dt><dd id="combat"></dd><div id="readiness-meter" class="meter" role="meter" aria-valuemin="0" aria-valuemax="7"><span></span></div><p id="readiness-hint" class="stat-hint"></p></div>
-            </dl>
-          </section>
-          <section id="manual-command" class="resource-card" aria-label="Army resources today" hidden>
-            <p class="panel-kicker">Your army today</p>
-            <ul class="resource-list">
-              <li><span id="supply-label" class="resource-label stat-head" title="The shared stock this army spends in battle. At zero, its formations fight at half strength."><span class="ico" data-icon="crate" aria-hidden="true"></span> Supply</span><strong id="supply-pool"></strong><div id="supply-meter" class="meter" role="meter" aria-valuemin="0"><span></span></div><span class="stat-hint">Spent in battle. At zero, this army fights at half strength.</span></li>
-              <li><span class="resource-label stat-head" title="Each point adds 10 combat points to one battle. Unused points are replaced at the start of the next day."><span class="ico" data-icon="cannon" aria-hidden="true"></span> Artillery</span><strong id="artillery-pool"></strong><div id="artillery-meter" class="meter" role="meter" aria-valuemin="0"><span></span></div><span class="stat-hint">Each point adds 10 combat points to one battle. It refills tomorrow.</span></li>
-              <li><span class="resource-label stat-head" title="Only German tanks spend fuel, when they move or attack. The pool is never refilled. Low fuel halves their movement."><span class="ico" data-icon="fuel" aria-hidden="true"></span> German fuel</span><strong id="fuel-pool"></strong><div id="fuel-meter" class="meter" role="meter" aria-valuemin="0"><span></span></div><span class="stat-hint">German tanks spend this to move and attack. It never refills. Low fuel halves their movement.</span></li>
-            </ul>
-          </section>
-          <section class="score-card objectives-section" aria-label="Victory score and towns">
-            <p class="panel-kicker with-icon"><span class="ico" data-icon="star" aria-hidden="true"></span> Victory score</p>
-            <p class="score-figure"><strong id="score"></strong></p>
-            <div class="tug-wrap">
-              <div id="tug" class="tug" role="img"><span id="tug-marker" class="needle"></span><span id="tug-target" class="goal" title="German victory starts here"></span></div>
-              <div class="tug-scale"><span>Allies ahead</span><span id="tug-goal-label">700</span><span>Germany ahead</span></div>
-            </div>
-            <p id="score-explain"></p>
-            <ul id="objectives"></ul>
-          </section>
-        </div>
+        </details>
+        <details class="drawer"><summary>Campaign history</summary>
+        <details class="campaign-history">
+          <summary>Campaign History <span id="history-count"></span></summary>
+          <p class="history-intro">Newest events first. The American and German panels beside the map explain current operations; this history keeps up to 60 saved events, including earlier turns.</p>
+          <ol id="dispatches" aria-label="Saved campaign events, newest first"></ol>
+        </details>
+        </details>
         <details id="computer-defense">
           <summary>When the computer attacks you</summary>
           <div class="defense-body">
@@ -488,7 +619,12 @@
             <p>Not used on your own attack. Each computer attack still asks again on the map. <a href="help.html#manual-mode" target="_blank" rel="noopener">How defense and artillery work</a></p>
           </div>
         </details>
+        </div>
       </aside>
+      <details id="advisor" class="advisor" open hidden>
+        <summary>Advisor / <span id="advisor-count">0</span></summary>
+        <ol id="advisor-list" aria-label="Suggestions for the human player"></ol>
+      </details>
     </div>
   </main>
   <input id="save-file" type="file" accept=".json,application/json" hidden>
@@ -513,8 +649,10 @@
     <p>Press any key to return to orders. R opens this report during movement or combat.</p>
     <div class="actions"><button data-close="phase-report-dialog">Continue</button></div>
   </dialog>
+  <dialog id="victory-explainer" aria-labelledby="victory-explainer-title"><h2 id="victory-explainer-title">How victory works</h2><div id="victory-explainer-body"></div><div class="actions"><button data-close="victory-explainer">Close</button></div></dialog>
   <dialog id="rules-dialog" aria-labelledby="rules-title"><h2 id="rules-title">Campaign Rules</h2>
     <p>New campaigns use the Manual-based rules: separate movement and combat phases, combined attacks, artillery, strategy, supply, fuel and readiness. Germany cannot move on turn 1. New player-aid campaigns use provisional 24 MP infantry / 30 MP mechanized allowances; existing saves retain their allowances. The rules are an adaptation; see the <a href="help.html#manual-mode" target="_blank" rel="noopener">Manual-based guide</a> for details and documented approximations.</p>
+    <p><strong>Most points wins.</strong> The Allies are shown with <strong>699 victory points (VP)</strong> already in a full campaign, and <strong>324</strong> in the short scenario, because Germany is attacking and must break through. Add that to the points the Allies earn. The higher total is winning, and the board rounds those totals to whole numbers. Classic campaigns show America with <strong>7</strong>. Full-campaign levels: Allies 649+, 400–648, 0–399, then Germany 1–250, 251–500, 501+. Short scenario: Allies 274+, 150–273, 0–149, then Germany 1–100, 101–375, 376+. Classic: America 0+, Germany 1+. Each destroyed enemy combat point is worth 1. German units also score Bastogne 50, Marche 25 and Rochefort 25 at the end of a day, plus marked edges (south or west 3, north 10) and exits. Those German place awards double while the computer plays Germany. Allied units score 20 on a marked eastern edge.</p>
     <p>Command either side across the twelve daily turns from 16–27 December. Follow the victory assessment on the campaign screen for the current objective and scoring. The computer controls the opposing side unless you choose Two players / Hotseat.</p>
     <p>Use the controls beside the map to issue movement and combat orders. New campaigns autosave in the browser; Export Save and Import Save transfer campaigns. Existing saves retain their saved rules.</p>
     <p>This is an original scenario, not the original game's exact map or combat tables.</p>
@@ -549,6 +687,7 @@
     <div class="actions"><button data-close="combat-plan">Cancel</button><button id="resolve-attack">Resolve Attack</button></div>
   </dialog>
   <dialog id="restart-dialog" aria-labelledby="restart-title"><h2 id="restart-title">Start a New Campaign?</h2><p>Your current autosave will be replaced. New campaigns use the Manual-based rules. Choose your command side; the computer controls the opposing side.</p>
+    <p id="campaign-win-line"><strong>Most points wins.</strong> The Allies start with 699 victory points (VP) already because Germany is attacking. Add that to the points the Allies earn. The higher total wins. The victory level is how far ahead that total is on the board. The short scenario uses 324. Classic saves show America starting with 7.</p>
     <fieldset id="aid-campaign-options"><legend>Player's aid card options</legend>
       <label for="campaign-scenario">Scenario</label><select id="campaign-scenario"><option value="campaign">Full campaign / 16–27 December</option><option value="short">Bastogne–St. Vith / 16–22 December</option></select>
       <label for="german-rating">German strength rating / 1–9</label><input id="german-rating" type="number" min="1" max="9" step="1" value="5">
