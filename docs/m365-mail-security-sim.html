@@ -130,7 +130,29 @@
     .brand-links {
       display: flex;
       flex-wrap: wrap;
+      align-items: center;
       gap: 6px;
+    }
+
+    .theme-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      height: auto;
+      width: auto;
+      border: 1px solid var(--cp-border-strong);
+      border-radius: 999px;
+      padding: 3px 10px;
+      font-size: 0.74rem;
+      font-weight: 600;
+      color: var(--cp-text);
+      background: var(--cp-surface);
+      cursor: pointer;
+    }
+
+    .theme-toggle:hover {
+      border-color: var(--cp-accent);
+      background: var(--cp-accent-soft);
     }
 
     .brand-link {
@@ -360,16 +382,27 @@
 
     .toggles {
       display: grid;
-      grid-template-columns: repeat(2, minmax(180px, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 8px;
       margin-top: 12px;
       padding-top: 12px;
       border-top: 1px dashed var(--cp-border);
     }
 
+    .toggles-hint {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+      font-size: 0.78rem;
+      color: var(--cp-text-soft);
+    }
+
     .auth-signal-grid {
       display: grid;
-      grid-template-columns: repeat(4, minmax(170px, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 8px;
       margin-top: 10px;
       padding-top: 10px;
@@ -407,10 +440,22 @@
       background: var(--cp-surface-soft);
       color: var(--cp-text-muted);
       font-size: 0.86rem;
+      cursor: pointer;
+      min-width: 0;
+    }
+
+    .toggle:hover {
+      border-color: var(--cp-border-strong);
+    }
+
+    .toggle.unavailable {
+      opacity: 0.58;
+      cursor: not-allowed;
     }
 
     .toggle input {
       accent-color: var(--cp-accent);
+      flex: 0 0 auto;
     }
 
     .mode-row {
@@ -703,6 +748,16 @@
       display: none;
     }
 
+    .sim-wrap.fast-mode .stage.active::before,
+    .sim-wrap.fast-mode .stage.active .stage-icon,
+    .sim-wrap.fast-mode .stage .result.result-pop {
+      animation-duration: 180ms;
+    }
+
+    .sim-wrap.fast-mode .stage.active .stage-icon {
+      animation-iteration-count: 1;
+    }
+
     .stage.active {
       border-color: var(--cp-accent);
       transform: translateY(-2px);
@@ -911,6 +966,17 @@
       z-index: 4;
     }
 
+    .sim-wrap.fast-mode .packet-trail {
+      transition-duration: 180ms;
+    }
+
+    .sim-wrap.fast-mode .packet-trail.moving .packet,
+    .sim-wrap.fast-mode .packet-trail.impact-good .packet,
+    .sim-wrap.fast-mode .packet-trail.impact-warn .packet,
+    .sim-wrap.fast-mode .packet-trail.impact-bad .packet {
+      animation-duration: 180ms;
+    }
+
     .packet-trail.moving .packet {
       animation: mailTravel 520ms ease;
     }
@@ -1093,13 +1159,13 @@
     }
 
     @media (prefers-reduced-motion: reduce) {
-      .stage,
-      .packet-trail,
-      .packet,
-      .auth-badge,
-      .stage .result {
-        animation: none !important;
-        transition: none !important;
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
       }
     }
 
@@ -1648,7 +1714,7 @@
       position: sticky;
       top: 12px;
       z-index: 4;
-      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
+      box-shadow: var(--cp-shadow);
     }
 
     .coach-head {
@@ -1774,6 +1840,62 @@
         padding: 10px;
       }
     }
+
+    @media (max-width: 640px) {
+      .shell {
+        width: calc(100% - 20px);
+        margin: 12px auto;
+      }
+
+      .panel {
+        padding: 14px;
+      }
+
+      .toggles {
+        grid-template-columns: 1fr;
+      }
+
+      .flow-track {
+        padding-right: 0;
+      }
+
+      .packet-trail {
+        position: sticky;
+        top: 8px;
+        transform: none !important;
+        transition: none !important;
+        margin-bottom: 10px;
+        padding: 8px 10px;
+        border: 1px solid var(--cp-border);
+        border-radius: 12px;
+        background: var(--cp-panel-strong);
+        box-shadow: var(--cp-shadow);
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        pointer-events: auto;
+      }
+
+      .auth-badges {
+        margin-top: 0;
+      }
+
+      .threat-meter {
+        margin-top: 0;
+        width: 100%;
+      }
+
+      .bar-row {
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .bar-row > span:first-child {
+        flex: 1 1 auto;
+      }
+    }
   </style>
 </head>
 <body>
@@ -1786,6 +1908,7 @@
           <a class="brand-link" href="https://github.com/directorcia/Office365/wiki/Exchange-Online-and-Defender-for-Office-365-Policy-Flow-Simulation-Guide" target="_blank" rel="noopener noreferrer">Simulation Guide</a>
           <a class="brand-link" href="https://github.com/directorcia/Office365" target="_blank" rel="noopener noreferrer">GitHub Scripts</a>
           <a class="brand-link" href="https://www.ciaopspatron.com/" target="_blank" rel="noopener noreferrer">CIAOPS Patron</a>
+          <button type="button" class="theme-toggle" id="themeToggleBtn" aria-label="Toggle color theme">Theme</button>
         </nav>
       </div>
       <h1>Exchange Online + Defender for Office 365 Policy Flow Simulator</h1>
@@ -1878,6 +2001,9 @@
       </section>
 
       <div class="toggles" id="toggleGrid">
+        <div class="toggles-hint" id="togglesHint">
+          <span>Tip: Toggle any control below to automatically switch to Custom profile.</span>
+        </div>
         <label class="toggle"><input type="checkbox" data-key="enforceSpf"> SPF enforcement</label>
         <label class="toggle"><input type="checkbox" data-key="enforceDkim"> DKIM enforcement</label>
         <label class="toggle"><input type="checkbox" data-key="enforceDmarc"> DMARC enforcement</label>
@@ -2408,6 +2534,7 @@
     };
 
     const stageLicenseRequirements = {
+      transportDlp: { feature: "purviewDlp", label: "Purview DLP" },
       mdoPhish: { feature: "mdoImpersonation", label: "Impersonation protection" },
       mdoAttachments: { feature: "mdoSafeAttachments", label: "Safe Attachments" },
       mdoLinks: { feature: "mdoSafeLinks", label: "Safe Links" },
@@ -2684,6 +2811,7 @@
     };
 
     const flowTrack = document.getElementById("flowTrack");
+    const simWrap = document.getElementById("simWrap");
     const packetTrail = document.getElementById("packetTrail");
     const authBadges = document.getElementById("authBadges");
     const badgeSpf = document.getElementById("badge-spf");
@@ -2733,6 +2861,27 @@
     const referenceHub = document.getElementById("referenceHub");
     const ciaopsYear = document.getElementById("ciaopsYear");
     const footerVersion = document.getElementById("footerVersion");
+    const themeToggleBtn = document.getElementById("themeToggleBtn");
+    const togglesHint = document.getElementById("togglesHint");
+
+    function updateThemeToggleLabel() {
+      if (!themeToggleBtn) return;
+      const currentTheme = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+      themeToggleBtn.textContent = currentTheme === "dark" ? "☀ Light theme" : "🌙 Dark theme";
+      themeToggleBtn.setAttribute(
+        "aria-label",
+        `Switch to ${currentTheme === "dark" ? "light" : "dark"} theme`
+      );
+    }
+
+    if (themeToggleBtn) {
+      updateThemeToggleLabel();
+      themeToggleBtn.addEventListener("click", () => {
+        const nextTheme = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+        document.documentElement.setAttribute("data-theme", nextTheme);
+        updateThemeToggleLabel();
+      });
+    }
 
     if (ciaopsYear) {
       ciaopsYear.textContent = String(new Date().getFullYear());
@@ -2755,6 +2904,7 @@
     let running = false;
     let learningContinueResolver = null;
     let lastRunReport = null;
+    let currentPacketStageKey = stages[0].key;
 
     function setReportActionsEnabled(enabled) {
       copyReportBtn.disabled = !enabled;
@@ -2764,7 +2914,7 @@
         : "Run a simulation to enable report actions.";
     }
 
-    function buildRunReport(scenario, scenarioKey, profileLabel, licenseLabel, journey, risk) {
+    function buildRunReport(scenario, scenarioKey, profileLabel, licenseLabel, journey, risk, settings = {}) {
       return {
         generatedAt: new Date().toISOString(),
         scenario: { key: scenarioKey, name: scenario.name },
@@ -2772,6 +2922,7 @@
           profile: profileLabel,
           licence: licenseLabel,
           mode: simMode.value,
+          dmarcPolicy: getEffectiveDmarcPolicy(settings),
           authenticationOverrides: {
             spf: spfSignalSelect.value,
             dkim: dkimSignalSelect.value,
@@ -2800,6 +2951,7 @@
         `Scenario: ${report.scenario.name}`,
         `Profile: ${report.configuration.profile}`,
         `Licence: ${report.configuration.licence}`,
+        `DMARC policy: p=${report.configuration.dmarcPolicy}`,
         `Mode: ${report.configuration.mode}`,
         `Risk: ${report.risk.initial}/100 initial -> ${report.risk.final}/100 final`,
         `Terminal outcome: ${report.risk.terminal}`,
@@ -2928,12 +3080,43 @@
       return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
+    function prefersReducedMotion() {
+      return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    }
+
     function isLearningMode() {
       return simMode.value === "learning";
     }
 
     function syncModeUI() {
-      coachPanel.style.display = isLearningMode() ? "grid" : "none";
+      const learningMode = isLearningMode();
+      coachPanel.style.display = learningMode ? "grid" : "none";
+      simWrap.classList.toggle("fast-mode", !learningMode);
+    }
+
+    function setSimulationRunning(isRunning) {
+      [
+        scenarioSelect,
+        profileSelect,
+        licenseSelect,
+        spfSignalSelect,
+        dkimSignalSelect,
+        dmarcSignalSelect,
+        dmarcPolicySelect,
+        simMode,
+        resetBtn,
+        ...toggleGrid.querySelectorAll("input")
+      ].forEach((control) => {
+        control.disabled = isRunning;
+      });
+
+      runBtn.disabled = isRunning;
+      runBtn.textContent = isRunning ? "Running simulation..." : "Run Simulation";
+      runBtn.setAttribute("aria-busy", String(isRunning));
+
+      if (!isRunning) {
+        syncTogglesFromProfile();
+      }
     }
 
     function setCoachIdle() {
@@ -3093,9 +3276,10 @@
       return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
     }
 
-    function getMisconfigurationFindings(settings, scenario, journey) {
+    function getMisconfigurationFindings(settings, scenario, journey, licenseKey = "m365E5") {
       const findings = [];
       const dmarcPolicy = getEffectiveDmarcPolicy(settings);
+      const isLicensed = (featureKey) => hasLicenseFeature(licenseKey, featureKey);
 
       if (!settings.enforceSpf && !scenario.spfPass) {
         findings.push({
@@ -3118,14 +3302,32 @@
       }
       if (!settings.mdoSafeLinks && scenario.hasMaliciousLink) {
         findings.push({
-          label: "Safe Links is off",
-          detail: "Users can click malicious URLs without time-of-click detonation and rewrite protection."
+          label: isLicensed("mdoSafeLinks") ? "Safe Links is off" : "Safe Links is unlicensed",
+          detail: isLicensed("mdoSafeLinks")
+            ? "Users can click malicious URLs without time-of-click detonation and rewrite protection."
+            : "Selected licence does not include Safe Links time-of-click detonation and URL rewrite protection."
         });
       }
       if (!settings.mdoSafeAttachments && scenario.hasMalwareAttachment) {
         findings.push({
-          label: "Safe Attachments is off",
-          detail: "Attachment payload behavior is not detonated in sandbox before user exposure."
+          label: isLicensed("mdoSafeAttachments") ? "Safe Attachments is off" : "Safe Attachments is unlicensed",
+          detail: isLicensed("mdoSafeAttachments")
+            ? "Attachment payload behavior is not detonated in sandbox before user exposure."
+            : "Selected licence does not include Safe Attachments sandbox detonation."
+        });
+      }
+      if (
+        scenario.spoofedDisplay &&
+        !settings.mdoMailboxIntelligence &&
+        !settings.mdoUserImpersonationProtection &&
+        !settings.mdoDomainImpersonationProtection &&
+        !settings.mdoPresetStrict
+      ) {
+        findings.push({
+          label: isLicensed("mdoImpersonation") ? "MDO impersonation protection is off" : "MDO impersonation protection is unlicensed",
+          detail: isLicensed("mdoImpersonation")
+            ? "Mailbox intelligence and user/domain impersonation checks are disabled, increasing BEC exposure."
+            : "Selected licence does not include Defender mailbox intelligence and user/domain impersonation checks."
         });
       }
       if (!settings.eopAntiMalware && scenario.hasMalwareAttachment) {
@@ -3148,8 +3350,10 @@
       }
       if (!settings.dlpPolicy && scenario.autoForwardAttempt) {
         findings.push({
-          label: "DLP policy is off",
-          detail: "Sensitive data movement signals may bypass policy-based containment and review workflows."
+          label: isLicensed("purviewDlp") ? "DLP policy is off" : "Purview DLP is unlicensed",
+          detail: isLicensed("purviewDlp")
+            ? "Sensitive data movement signals may bypass policy-based containment and review workflows."
+            : "Selected licence does not include Purview DLP policy containment for email."
         });
       }
       if (!settings.mailFlowRules && (scenario.spoofedDisplay || scenario.hasMaliciousLink || scenario.hasMalwareAttachment)) {
@@ -3160,20 +3364,26 @@
       }
       if (!settings.sensitivityLabels && scenario.hasSensitiveData) {
         findings.push({
-          label: "Sensitivity labels are off",
-          detail: "Sensitive content classification and persistent protection markers are not being applied."
+          label: isLicensed("purviewLabels") ? "Sensitivity labels are off" : "Sensitivity labels are unlicensed",
+          detail: isLicensed("purviewLabels")
+            ? "Sensitive content classification and persistent protection markers are not being applied."
+            : "Selected licence does not include Purview sensitivity label enforcement."
         });
       }
       if (!settings.messageEncryption && scenario.hasSensitiveData) {
         findings.push({
-          label: "Message encryption is off",
-          detail: "Sensitive communication can leave the tenant without policy-enforced encryption controls."
+          label: isLicensed("purviewEncryption") ? "Message encryption is off" : "Message encryption is unlicensed",
+          detail: isLicensed("purviewEncryption")
+            ? "Sensitive communication can leave the tenant without policy-enforced encryption controls."
+            : "Selected licence does not include Purview message encryption."
         });
       }
       if (!settings.insiderRisk && scenario.hasInsiderRiskSignal) {
         findings.push({
-          label: "Insider risk monitoring is off",
-          detail: "Potential internal misuse patterns may not trigger correlated insider risk investigation."
+          label: isLicensed("purviewInsiderRisk") ? "Insider risk monitoring is off" : "Insider risk monitoring is unlicensed",
+          detail: isLicensed("purviewInsiderRisk")
+            ? "Potential internal misuse patterns may not trigger correlated insider risk investigation."
+            : "Selected licence does not include Purview Insider Risk Management."
         });
       }
       if (!settings.blockExternalForwarding && scenario.autoForwardAttempt) {
@@ -3190,8 +3400,10 @@
       }
       if (!settings.mdoAir && (scenario.hasMaliciousLink || scenario.hasMalwareAttachment || scenario.spoofedDisplay)) {
         findings.push({
-          label: "AIR automation is off",
-          detail: "Security operations must investigate and remediate manually, increasing response time."
+          label: isLicensed("mdoAir") ? "AIR automation is off" : "AIR automation is unlicensed",
+          detail: isLicensed("mdoAir")
+            ? "Security operations must investigate and remediate manually, increasing response time."
+            : "Selected licence does not include Automated Investigation and Response (AIR)."
         });
       }
       if (!settings.antiPhishStrict && scenario.spoofedDisplay) {
@@ -3211,8 +3423,8 @@
       return findings;
     }
 
-    function renderMisconfigurationCallouts(profileValue, settings, scenario, journey) {
-      const findings = getMisconfigurationFindings(settings, scenario, journey);
+    function renderMisconfigurationCallouts(profileValue, settings, scenario, journey, licenseKey = "m365E5") {
+      const findings = getMisconfigurationFindings(settings, scenario, journey, licenseKey);
       const weakProfileSelected = profileValue !== "strict";
       const riskIncreased = findings.some((f) => f.label !== "No critical misconfiguration observed in this path");
 
@@ -3285,12 +3497,29 @@
         clean: "Legitimate traffic flowed without interruption while controls remained ready for higher-risk messages."
       };
 
-      const body = delivered ? (failStory[scenarioKey] || failStory.clean) : (successStory[scenarioKey] || successStory.clean);
-      const pillClass = delivered ? "warn" : "good";
-      const pillText = delivered ? "Potential business impact" : "Risk contained";
-      const footnote = delivered
-        ? `Profile used: ${profileLabel}. This path delivered; consider tightening controls that produced warning outcomes.`
-        : `Profile used: ${profileLabel}. Message blocked at ${blockedAt}; layered controls prevented likely user impact.`;
+      const activeThreat = Boolean(
+        scenario.spoofedDisplay ||
+        scenario.hasMalwareAttachment ||
+        scenario.hasMaliciousLink ||
+        scenario.autoForwardAttempt ||
+        scenario.highValuePaymentRequest ||
+        scenario.usesOAuthAbuse ||
+        scenario.usesQrEmbeddedUrl ||
+        !scenario.spfPass ||
+        !scenario.dkimPass ||
+        !scenario.dmarcAligned
+      );
+      const benignDelivered = delivered && !activeThreat && journey.warnCount === 0;
+      const body = (!delivered || benignDelivered)
+        ? (successStory[scenarioKey] || successStory.clean)
+        : (failStory[scenarioKey] || failStory.clean);
+      const pillClass = (!delivered || benignDelivered) ? "good" : "warn";
+      const pillText = !delivered ? "Risk contained" : benignDelivered ? "Expected delivery" : "Potential business impact";
+      const footnote = !delivered
+        ? `Profile used: ${profileLabel}. Message blocked at ${blockedAt}; layered controls prevented likely user impact.`
+        : benignDelivered
+          ? `Profile used: ${profileLabel}. Legitimate message delivered cleanly with zero warning stages.`
+          : `Profile used: ${profileLabel}. This path delivered; consider tightening controls that produced warning outcomes.`;
 
       return { body, pillClass, pillText, footnote };
     }
@@ -3365,16 +3594,31 @@
         return baseValue;
       };
 
+      const spfSelected = spfSignalSelect?.value || "auto";
+      const dkimSelected = dkimSignalSelect?.value || "auto";
+      const dmarcSelected = dmarcSignalSelect?.value || "auto";
+
+      const spfPass = pickSignal(baseScenario.spfPass, spfSelected);
+      const dkimPass = pickSignal(baseScenario.dkimPass, dkimSelected);
+      const dmarcAligned = dmarcSelected === "auto"
+        ? (Boolean(baseScenario.dmarcAligned) && (spfPass || dkimPass))
+        : pickSignal(baseScenario.dmarcAligned, dmarcSelected);
+
       return {
         ...baseScenario,
-        spfPass: pickSignal(baseScenario.spfPass, spfSignalSelect?.value || "auto"),
-        dkimPass: pickSignal(baseScenario.dkimPass, dkimSignalSelect?.value || "auto"),
-        dmarcAligned: pickSignal(baseScenario.dmarcAligned, dmarcSignalSelect?.value || "auto")
+        spfPass,
+        dkimPass,
+        dmarcAligned
       };
     }
 
     function updateInheritedSignalLabels() {
       const selectedScenario = scenarios[scenarioSelect?.value] || scenarios.clean;
+      const spfSelected = spfSignalSelect?.value || "auto";
+      const dkimSelected = dkimSignalSelect?.value || "auto";
+      const effSpf = spfSelected === "pass" ? true : spfSelected === "fail" ? false : !!selectedScenario.spfPass;
+      const effDkim = dkimSelected === "pass" ? true : dkimSelected === "fail" ? false : !!selectedScenario.dkimPass;
+      const effDmarcAuto = Boolean(selectedScenario.dmarcAligned) && (effSpf || effDkim);
       const toSignalLabel = (value) => (value ? "pass" : "fail");
       const setAutoLabel = (selectEl, baseValue) => {
         if (!selectEl) return;
@@ -3385,7 +3629,7 @@
 
       setAutoLabel(spfSignalSelect, !!selectedScenario.spfPass);
       setAutoLabel(dkimSignalSelect, !!selectedScenario.dkimPass);
-      setAutoLabel(dmarcSignalSelect, !!selectedScenario.dmarcAligned);
+      setAutoLabel(dmarcSignalSelect, effDmarcAuto);
     }
 
     function getEffectiveDmarcPolicy(settings) {
@@ -3413,17 +3657,21 @@
       if (scenario.hasMaliciousLink) score += 20;
       if (scenario.hasMalwareAttachment) score += 24;
       if (scenario.autoForwardAttempt) score += 16;
+      if (scenario.usesOAuthAbuse) score += 14;
+      if (scenario.usesQrEmbeddedUrl) score += 10;
       return clampRisk(score);
     }
 
     function getThreatDeltaForStage(stageKey, status, scenario, settings) {
+      if (status === "na") return 0;
+
       switch (stageKey) {
         case "edge":
           return status === "warn" ? 8 : -2;
         case "spf":
-          return !scenario.spfPass ? 10 : -3;
+          return !scenario.spfPass ? (settings.enforceSpf ? 5 : 10) : -3;
         case "dkim":
-          return !scenario.dkimPass ? 8 : -3;
+          return !scenario.dkimPass ? (settings.enforceDkim ? 4 : 8) : -3;
         case "dmarc":
           if (status === "block") return -100;
           if (!scenario.dmarcAligned) {
@@ -3433,11 +3681,11 @@
           }
           return -5;
         case "eopPhish":
-          return scenario.spoofedDisplay ? (settings.antiPhishStrict ? 5 : 10) : -4;
+          return scenario.spoofedDisplay ? (settings.antiPhishStrict ? -3 : 10) : -4;
         case "eopSpam":
           return status === "warn" ? 6 : -3;
         case "eopMalware":
-          return scenario.hasMalwareAttachment ? (settings.eopAntiMalware ? 7 : 12) : -4;
+          return scenario.hasMalwareAttachment ? (settings.eopAntiMalware ? 4 : 12) : -4;
         case "transportKeyword":
           return (scenario.spoofedDisplay || scenario.hasMaliciousLink)
             ? (settings.keywordBlocking ? -5 : 8)
@@ -3447,24 +3695,26 @@
           return scenario.highValuePaymentRequest ? (settings.financialApprovalRule ? -9 : 10) : -2;
         case "transportDlp":
           if (status === "block") return -100;
-          return (scenario.autoForwardAttempt || scenario.hasMaliciousLink)
-            ? (settings.dlpPolicy ? -6 : 9)
-            : -2;
+          if (scenario.autoForwardAttempt) return settings.dlpPolicy ? -6 : 9;
+          if (scenario.hasMaliciousLink) return settings.dlpPolicy ? -4 : 0;
+          return -2;
         case "transportMailFlow":
           return (scenario.spoofedDisplay || scenario.hasMaliciousLink || scenario.hasMalwareAttachment)
             ? (settings.mailFlowRules ? -4 : 7)
             : -2;
         case "purviewLabels":
-          return scenario.hasSensitiveData ? (settings.sensitivityLabels ? -4 : 7) : -2;
+          return scenario.hasSensitiveData ? (settings.sensitivityLabels ? -4 : 7) : (settings.sensitivityLabels ? -2 : 0);
         case "purviewEncryption":
-          return scenario.hasSensitiveData ? (settings.messageEncryption ? -6 : 9) : -2;
+          return scenario.hasSensitiveData ? (settings.messageEncryption ? -6 : 9) : (settings.messageEncryption ? -2 : 0);
         case "purviewInsider":
-          return scenario.hasInsiderRiskSignal ? (settings.insiderRisk ? -6 : 9) : -2;
+          return scenario.hasInsiderRiskSignal ? (settings.insiderRisk ? -6 : 9) : (settings.insiderRisk ? -2 : 0);
         case "mdoPhish":
           if (scenario.usesOAuthAbuse) {
-            return 6;
+            return (settings.mdoMailboxIntelligence || settings.mdoUserImpersonationProtection || settings.mdoDomainImpersonationProtection || settings.mdoPresetStrict) ? 4 : 8;
           }
-          return scenario.spoofedDisplay ? (settings.mdoMailboxIntelligence || settings.mdoUserImpersonationProtection || settings.mdoDomainImpersonationProtection ? -6 : 9) : -4;
+          return scenario.spoofedDisplay
+            ? (settings.mdoMailboxIntelligence || settings.mdoUserImpersonationProtection || settings.mdoDomainImpersonationProtection || settings.mdoPresetStrict ? -6 : 9)
+            : -4;
         case "mdoAttachments":
           if (status === "block") return -100;
           return scenario.hasMalwareAttachment ? (settings.mdoSafeAttachments ? -8 : 11) : -5;
@@ -3592,7 +3842,7 @@
           <div class="stage-meter"><div class="stage-meter-fill" id="meter-${stage.key}"></div></div>
           <div class="result" id="result-${stage.key}">Awaiting simulation...</div>
           <div class="stage-actions">
-            <button type="button" class="evidence-toggle" id="whybtn-${stage.key}" aria-expanded="false" disabled>Show me why</button>
+            <button type="button" class="evidence-toggle" id="whybtn-${stage.key}" aria-expanded="false" aria-controls="whypanel-${stage.key}" disabled>Show me why</button>
           </div>
           <div class="evidence-box" id="whypanel-${stage.key}">Decision evidence will appear after this stage runs.</div>
         `;
@@ -3831,11 +4081,23 @@
         const requiredFeature = toggleLicenseRequirements[box.dataset.key];
         const unavailableInLicense = requiredFeature ? !hasLicenseFeature(selectedLicense, requiredFeature) : false;
         box.checked = !!settings[box.dataset.key];
-        box.disabled = usingPreset || unavailableInLicense;
+        box.disabled = running || unavailableInLicense;
+        const labelEl = box.closest(".toggle");
+        if (labelEl) {
+          labelEl.classList.toggle("unavailable", unavailableInLicense);
+          labelEl.title = unavailableInLicense
+            ? "Unavailable in the selected licence"
+            : "";
+        }
       });
       if (dmarcPolicySelect) {
         dmarcPolicySelect.value = getEffectiveDmarcPolicy(settings);
-        dmarcPolicySelect.disabled = usingPreset || !settings.enforceDmarc;
+        dmarcPolicySelect.disabled = running || !settings.enforceDmarc;
+      }
+      if (togglesHint) {
+        togglesHint.textContent = usingPreset
+          ? "Tip: Toggle any licensed control below to customize and switch Policy Profile to Custom."
+          : "Custom profile active: licensed policy controls below can be toggled freely.";
       }
 
       renderProfileHint();
@@ -3900,9 +4162,9 @@
         licenseSummaryWhy.textContent = "Why this matters: multiple missing controls typically increase breach likelihood, incident workload, and business disruption costs.";
       }
 
-      licenseIncludedList.innerHTML = included
-        .map((label) => `<li class="license-summary-item included">✓ ${label}</li>`)
-        .join("");
+      licenseIncludedList.innerHTML = included.length
+        ? included.map((label) => `<li class="license-summary-item included">✓ ${label}</li>`).join("")
+        : '<li class="license-summary-item missing">✗ Baseline EOP only (no add-on Defender or Purview controls listed)</li>';
 
       licenseMissingList.innerHTML = missing.length
         ? missing.map((label) => `<li class="license-summary-item missing">✗ ${label}</li>`).join("")
@@ -3984,6 +4246,12 @@
           }
           return { status: "pass", text: "No payment-approval rule trigger required." };
         case "transportDlp":
+          {
+            const licenseWarning = getLicenseWarningForStage(stageKey, licenseKey);
+            if (licenseWarning) {
+              return { status: "na", text: licenseWarning };
+            }
+          }
           if (scenario.autoForwardAttempt && settings.dlpPolicy) {
             return { status: "block", text: "DLP policy detected potential data exfiltration behavior and blocked transmission." };
           }
@@ -3993,7 +4261,12 @@
           if (scenario.hasMaliciousLink && settings.dlpPolicy) {
             return { status: "warn", text: "DLP policy added compliance visibility for risky message content." };
           }
-          return { status: "pass", text: "No DLP-sensitive pattern detected at this stage." };
+          return {
+            status: "pass",
+            text: settings.dlpPolicy
+              ? "No DLP-sensitive pattern detected at this stage."
+              : "Purview DLP policy is disabled and no sensitive transfer pattern triggered."
+          };
         case "transportMailFlow":
           if ((scenario.spoofedDisplay || scenario.hasMaliciousLink || scenario.hasMalwareAttachment) && settings.mailFlowRules) {
             return { status: "warn", text: "Mail flow rules applied custom enforcement for this risk pattern." };
@@ -4015,7 +4288,12 @@
           if (scenario.hasSensitiveData && !settings.sensitivityLabels) {
             return { status: "warn", text: "Sensitivity labels are licensed but not enabled in this profile. Sensitive content classification is missing." };
           }
-          return { status: "pass", text: "Sensitivity labels are enabled and no labeling trigger was detected." };
+          return {
+            status: "pass",
+            text: settings.sensitivityLabels
+              ? "Sensitivity labels are enabled and no labeling trigger was detected."
+              : "Sensitivity labels are not enabled in this profile and no sensitive trigger was present."
+          };
         case "purviewEncryption":
           {
             const licenseWarning = getLicenseWarningForStage(stageKey, licenseKey);
@@ -4029,7 +4307,12 @@
           if (scenario.hasSensitiveData && !settings.messageEncryption) {
             return { status: "warn", text: "Message encryption is licensed but not enabled in this profile. Sensitive communication may be exposed." };
           }
-          return { status: "pass", text: "Message encryption is enabled and no encryption trigger was required." };
+          return {
+            status: "pass",
+            text: settings.messageEncryption
+              ? "Message encryption is enabled and no encryption trigger was required."
+              : "Message encryption is not enabled in this profile and no sensitive trigger was present."
+          };
         case "purviewInsider":
           {
             const licenseWarning = getLicenseWarningForStage(stageKey, licenseKey);
@@ -4043,7 +4326,12 @@
           if (scenario.hasInsiderRiskSignal && !settings.insiderRisk) {
             return { status: "warn", text: "Insider risk is licensed but not enabled in this profile. Internal misuse indicators may be missed." };
           }
-          return { status: "pass", text: "Insider risk monitoring is enabled and no behavior trigger was detected." };
+          return {
+            status: "pass",
+            text: settings.insiderRisk
+              ? "Insider risk monitoring is enabled and no behavior trigger was detected."
+              : "Insider risk monitoring is not enabled in this profile and no behavior trigger was present."
+          };
         case "mdoPhish": {
           const licenseWarning = getLicenseWarningForStage(stageKey, licenseKey);
           if (licenseWarning) {
@@ -4163,6 +4451,7 @@
       const warnCount = results.filter((r) => r.status === "warn").length;
       const blockCount = results.filter((r) => r.status === "block").length;
       const passCount = results.filter((r) => r.status === "pass").length;
+      const naCount = results.filter((r) => r.status === "na").length;
       const activeThreat = Boolean(
         scenario.spoofedDisplay ||
         scenario.hasMalwareAttachment ||
@@ -4170,7 +4459,10 @@
         scenario.autoForwardAttempt ||
         scenario.highValuePaymentRequest ||
         scenario.usesOAuthAbuse ||
-        scenario.usesQrEmbeddedUrl
+        scenario.usesQrEmbeddedUrl ||
+        !scenario.spfPass ||
+        !scenario.dkimPass ||
+        !scenario.dmarcAligned
       );
 
       // Scenario-family thresholds: stricter for identity/BEC abuse, softer for low-threat bulk traffic.
@@ -4194,9 +4486,39 @@
         exposureThresholds = { medium: 4, high: 9 };
       }
 
-      const prevented = blockCount > 0 ? "High" : warnCount > 1 ? "Medium" : "Low";
-      const unresolvedWarnings = results.filter((r) => r.status === "warn" && r.stage !== "post" && r.stage !== "purviewInsider").length;
-      // Score unresolved warning stages more heavily than static scenario signals.
+      // Distinguish unmitigated risk warnings (positive threat delta) from active protective mitigations (negative threat delta).
+      let unmitigatedWarnings = 0;
+      let protectiveMitigations = 0;
+      results.forEach((r) => {
+        if (r.status !== "warn") return;
+        const stageDelta = getThreatDeltaForStage(r.stage, r.status, scenario, settings);
+        if (stageDelta < 0) {
+          protectiveMitigations += 1;
+        } else if (r.stage !== "post" && r.stage !== "purviewInsider") {
+          unmitigatedWarnings += 1;
+        }
+      });
+
+      const configuredControlCount = Object.entries(settings).filter(
+        ([key, val]) => key !== "dmarcPolicy" && val === true
+      ).length;
+      const dmarcPol = getEffectiveDmarcPolicy(settings);
+
+      let prevented = "Low";
+      if (blockCount > 0) {
+        prevented = "High";
+      } else if (!activeThreat) {
+        if (configuredControlCount >= 16 && dmarcPol === "reject") {
+          prevented = "High";
+        } else if (configuredControlCount >= 8) {
+          prevented = "Medium";
+        }
+      } else if (protectiveMitigations >= 3 && unmitigatedWarnings <= 2) {
+        prevented = "Medium";
+      } else if (protectiveMitigations >= 1 && unmitigatedWarnings <= 4) {
+        prevented = "Medium";
+      }
+
       const signalWeight =
         (scenario.spoofedDisplay ? 1 : 0) +
         (scenario.hasMaliciousLink ? 1 : 0) +
@@ -4205,7 +4527,7 @@
         (scenario.highValuePaymentRequest ? 1 : 0) +
         (scenario.usesOAuthAbuse ? 1 : 0) +
         (scenario.usesQrEmbeddedUrl ? 1 : 0);
-      const exposureScore = unresolvedWarnings * 2 + signalWeight;
+      const exposureScore = Math.max(0, unmitigatedWarnings * 2 + signalWeight - protectiveMitigations);
 
       let userExposure = "Low";
       if (activeThreat && blockCount === 0) {
@@ -4227,16 +4549,24 @@
         userExposure,
         passCount,
         warnCount,
+        naCount,
         blockCount,
         blockedStageTitle
       };
     }
 
     function movePacketToStage(stageId) {
-      const stage = document.getElementById("stage-" + stageId);
-      const wrapRect = document.getElementById("simWrap").getBoundingClientRect();
+      currentPacketStageKey = stageId || stages[0].key;
+      if (window.matchMedia("(max-width: 640px)").matches) {
+        packetTrail.style.transform = "";
+        return;
+      }
+      const stage = document.getElementById("stage-" + currentPacketStageKey);
+      if (!stage) return;
+      const wrapRect = simWrap.getBoundingClientRect();
       const stageRect = stage.getBoundingClientRect();
-      const x = stageRect.right - wrapRect.left + 10 + document.getElementById("simWrap").scrollLeft;
+      const desiredX = stageRect.right - wrapRect.left + 10 + simWrap.scrollLeft;
+      const x = Math.max(0, Math.min(desiredX, wrapRect.width - packetTrail.offsetWidth - 2));
       const y = stageRect.top - wrapRect.top + 8;
       packetTrail.style.transform = `translate(${x}px, ${y}px)`;
     }
@@ -4422,6 +4752,7 @@
           <span class="mini-stat">Pass: ${journey.passCount}</span>
           <span class="mini-stat">Warn: ${journey.warnCount}</span>
           <span class="mini-stat">Block: ${journey.blockCount}</span>
+          ${journey.naCount ? `<span class="mini-stat">N/A: ${journey.naCount}</span>` : ""}
           <span class="mini-stat">Stop point: ${journey.blockedStageTitle}</span>
         </div>
 
@@ -4432,20 +4763,23 @@
     async function runSimulation() {
       if (running) return;
       running = true;
-      runBtn.disabled = true;
+      setSimulationRunning(true);
       const learningMode = isLearningMode();
+      setReportActionsEnabled(false);
+      lastRunReport = null;
 
-      clearVisualState();
-      const scenarioBase = scenarios[scenarioSelect.value];
-      const scenario = applyAuthSignalOverrides(scenarioBase);
-      const scenarioKey = scenarioSelect.value;
-      const profileValue = profileSelect.value;
-      const profileLabel = profileSelect.options[profileSelect.selectedIndex]?.text || profileSelect.value;
-      const selectedLicense = licenseSelect.value;
-      const selectedSettings = applyLicenseToSettings(getSettings(), selectedLicense);
-      const selectedJourney = evaluateJourney(scenario, selectedSettings, selectedLicense);
-      const bestJourney = evaluateJourney(scenario, profiles.strict, "m365E5");
-      let currentThreatRisk = getBaseThreatRisk(scenario);
+      try {
+        clearVisualState();
+        const scenarioBase = scenarios[scenarioSelect.value];
+        const scenario = applyAuthSignalOverrides(scenarioBase);
+        const scenarioKey = scenarioSelect.value;
+        const profileValue = profileSelect.value;
+        const profileLabel = profileSelect.options[profileSelect.selectedIndex]?.text || profileSelect.value;
+        const selectedLicense = licenseSelect.value;
+        const selectedSettings = applyLicenseToSettings(getSettings(), selectedLicense);
+        const selectedJourney = evaluateJourney(scenario, selectedSettings, selectedLicense);
+        const bestJourney = evaluateJourney(scenario, profiles.strict, "m365E5");
+        let currentThreatRisk = getBaseThreatRisk(scenario);
 
       const preventionGain = levelToScore(bestJourney.prevented) - levelToScore(selectedJourney.prevented);
       const exposureReduction = levelToScore(selectedJourney.userExposure) - levelToScore(bestJourney.userExposure);
@@ -4456,7 +4790,10 @@
         scenario.autoForwardAttempt ||
         scenario.highValuePaymentRequest ||
         scenario.usesOAuthAbuse ||
-        scenario.usesQrEmbeddedUrl
+        scenario.usesQrEmbeddedUrl ||
+        !scenario.spfPass ||
+        !scenario.dkimPass ||
+        !scenario.dmarcAligned
       );
 
       let deltaInsight = "Selected profile is close to baseline for this scenario.";
@@ -4487,7 +4824,7 @@
       storyPill.textContent = story.pillText;
       storyBody.textContent = story.body;
       storyFootnote.textContent = story.footnote;
-      renderMisconfigurationCallouts(profileValue, selectedSettings, scenario, selectedJourney);
+      renderMisconfigurationCallouts(profileValue, selectedSettings, scenario, selectedJourney, selectedLicense);
       renderConfidenceIndicators(selectedJourney);
       updateThreatMeter(currentThreatRisk, 0, "Initial risk based on the selected message traits.");
 
@@ -4509,8 +4846,8 @@
         stageEl.classList.add("active");
         setStageAnalyzing(item.stage);
         movePacketToStage(item.stage);
-        scrollStageIntoView(stageEl, learningMode ? "smooth" : "smooth");
-        await new Promise((resolve) => setTimeout(resolve, 650));
+        scrollStageIntoView(stageEl, prefersReducedMotion() ? "auto" : "smooth");
+        await delay(prefersReducedMotion() ? 0 : learningMode ? 650 : 180);
 
         const threatDelta = getThreatDeltaForStage(item.stage, item.status, scenario, selectedSettings);
         currentThreatRisk = threatDelta <= -100 ? 0 : clampRisk(currentThreatRisk + threatDelta);
@@ -4539,7 +4876,7 @@
           break;
         }
 
-        await delay(learningMode ? 180 : 140);
+        await delay(prefersReducedMotion() ? 0 : learningMode ? 180 : 40);
       }
 
       appendLog(
@@ -4554,11 +4891,14 @@
         profileLabel,
         licenseLabel,
         selectedJourney,
-        currentThreatRisk
+        currentThreatRisk,
+        selectedSettings
       );
-      setReportActionsEnabled(true);
-      runBtn.disabled = false;
-      running = false;
+        setReportActionsEnabled(true);
+      } finally {
+        running = false;
+        setSimulationRunning(false);
+      }
     }
 
     function resetAll(resetAuthSignals = false) {
@@ -4577,15 +4917,26 @@
       setReportActionsEnabled(false);
     }
 
-    profileSelect.addEventListener("change", syncTogglesFromProfile);
-    licenseSelect.addEventListener("change", syncTogglesFromProfile);
+    profileSelect.addEventListener("change", () => {
+      syncTogglesFromProfile();
+      resetAll();
+    });
+    licenseSelect.addEventListener("change", () => {
+      syncTogglesFromProfile();
+      resetAll();
+    });
     toggleGrid.addEventListener("change", (event) => {
       const target = event.target;
       if (!(target instanceof HTMLInputElement)) return;
-      if (profileSelect.value !== "custom") return;
-      if (target.dataset.key !== "enforceDmarc") return;
+      if (profileSelect.value !== "custom") {
+        profileSelect.value = "custom";
+        renderProfileHint();
+        if (togglesHint) {
+          togglesHint.textContent = "Custom profile active: licensed policy controls below can be toggled freely.";
+        }
+      }
 
-      if (dmarcPolicySelect) {
+      if (target.dataset.key === "enforceDmarc" && dmarcPolicySelect) {
         if (target.checked) {
           if (dmarcPolicySelect.value === "none") {
             dmarcPolicySelect.value = "quarantine";
@@ -4598,14 +4949,29 @@
       }
       resetAll();
     });
-    dmarcPolicySelect.addEventListener("change", resetAll);
+    dmarcPolicySelect.addEventListener("change", () => {
+      if (profileSelect.value !== "custom") {
+        profileSelect.value = "custom";
+        renderProfileHint();
+        if (togglesHint) {
+          togglesHint.textContent = "Custom profile active: licensed policy controls below can be toggled freely.";
+        }
+      }
+      resetAll();
+    });
     scenarioSelect.addEventListener("change", () => {
       updateInheritedSignalLabels();
       resetAll();
     });
-    spfSignalSelect.addEventListener("change", resetAll);
-    dkimSignalSelect.addEventListener("change", resetAll);
-    dmarcSignalSelect.addEventListener("change", resetAll);
+    spfSignalSelect.addEventListener("change", () => {
+      updateInheritedSignalLabels();
+      resetAll();
+    });
+    dkimSignalSelect.addEventListener("change", () => {
+      updateInheritedSignalLabels();
+      resetAll();
+    });
+    dmarcSignalSelect.addEventListener("change", () => resetAll());
     simMode.addEventListener("change", syncModeUI);
     runBtn.addEventListener("click", runSimulation);
     resetBtn.addEventListener("click", () => resetAll(true));
@@ -4617,7 +4983,7 @@
         runSimulation();
       }
     });
-    window.addEventListener("resize", () => movePacketToStage(stages[0].key));
+    window.addEventListener("resize", () => movePacketToStage(currentPacketStageKey));
 
     buildStages();
     renderReferenceHub();
