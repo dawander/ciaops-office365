@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grow bugs | A little life simulation</title>
+  <meta name="description" content="Watch bugs explore, find food, reproduce, and evolve in a configurable, seeded habitat.">
+  <link rel="canonical" href="https://directorcia.github.io/Office365/grow-bugs.html">
+  <link rel="icon" type="image/svg+xml" href="grow-bugs-icon.svg">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Grow bugs | A little life simulation">
+  <meta property="og:description" content="Watch bugs explore, find food, reproduce, and evolve in a configurable, seeded habitat.">
+  <meta property="og:url" content="https://directorcia.github.io/Office365/grow-bugs.html">
+  <meta property="og:image" content="https://directorcia.github.io/Office365/images/grow-bugs-share.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Grow bugs: a little life simulation">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://directorcia.github.io/Office365/images/grow-bugs-share.png">
+  <script>
+    (() => {
+      const param = new URLSearchParams(window.location.search).get("scoutTheme");
+      const theme =
+        param || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", theme);
+    })();
+  </script>
+  <style>
+    :root {
+      color-scheme: light;
+      --cp-bg: #f7f4ef;
+      --cp-bg-elevated: #fcfbf8;
+      --cp-surface: #ffffff;
+      --cp-surface-soft: #f5f5f5;
+      --cp-border: #dedede;
+      --cp-border-strong: #919191;
+      --cp-text: #242424;
+      --cp-text-muted: #5c5c5c;
+      --cp-text-soft: #6f6f6f;
+      --cp-accent: #b11f4b;
+      --cp-accent-hover: #9a1a41;
+      --cp-accent-soft: rgba(177, 31, 75, 0.08);
+      --cp-accent-fg: #ffffff;
+      --cp-success: #16a34a;
+      --cp-danger: #dc2626;
+      --cp-warning: #f59e0b;
+      --cp-link: #0078d4;
+      --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.12);
+      --cp-overlay: rgba(255, 255, 255, 0.8);
+      --cp-panel: rgba(255, 255, 255, 0.86);
+      --cp-panel-strong: rgba(255, 255, 255, 0.96);
+      --cp-sheen: rgba(255, 255, 255, 0.55);
+      --cp-highlight: rgba(177, 31, 75, 0.12);
+    }
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --cp-bg: #3d3b3a;
+      --cp-bg-elevated: #343231;
+      --cp-surface: #292929;
+      --cp-surface-soft: #2e2e2e;
+      --cp-border: #474747;
+      --cp-border-strong: #5f5f5f;
+      --cp-text: #dedede;
+      --cp-text-muted: #919191;
+      --cp-text-soft: #b0b0b0;
+      --cp-accent: #fd8ea1;
+      --cp-accent-hover: #fb7b91;
+      --cp-accent-soft: rgba(253, 142, 161, 0.14);
+      --cp-accent-fg: #1a1a1a;
+      --cp-success: #4ade80;
+      --cp-danger: #f87171;
+      --cp-warning: #fbbf24;
+      --cp-link: #4da6ff;
+      --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+      --cp-overlay: rgba(41, 41, 41, 0.88);
+      --cp-panel: rgba(41, 41, 41, 0.72);
+      --cp-panel-strong: rgba(41, 41, 41, 0.96);
+      --cp-sheen: rgba(255, 255, 255, 0.04);
+      --cp-highlight: rgba(253, 142, 161, 0.12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--cp-bg);
+      color: var(--cp-text);
+      font-family: "Segoe UI", Aptos, Calibri, -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    button, a, input, select { font: inherit; }
+    a { color: inherit; }
+    button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, canvas:focus-visible { outline: 3px solid var(--cp-accent); outline-offset: 3px; }
+    .shell { max-width: 1280px; margin: auto; padding: 28px 32px 48px; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+    .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 700; font-size: 15px; }
+    .brand-mark { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 10px; background: var(--cp-accent); color: var(--cp-accent-fg); font-size: 17px; }
+    .back { color: var(--cp-text-muted); text-decoration: none; font-size: 13px; font-weight: 600; }
+    .back:hover { color: var(--cp-accent); }
+    .intro { display: flex; align-items: end; justify-content: space-between; gap: 24px; padding: 56px 0 28px; }
+    .eyebrow, .label, .section-label { text-transform: uppercase; letter-spacing: .14em; font-size: 10px; font-weight: 800; }
+    .eyebrow { color: var(--cp-accent); margin: 0 0 12px; }
+    h1 { margin: 0; font-size: clamp(42px, 6vw, 72px); letter-spacing: -.055em; line-height: .98; font-weight: 700; }
+    .intro-copy { color: var(--cp-text-muted); font-size: 16px; max-width: 460px; line-height: 1.6; margin: 16px 0 0; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    button { min-height: 44px; padding: 0 18px; border: 1px solid var(--cp-border); border-radius: .625rem; cursor: pointer; background: var(--cp-surface); color: var(--cp-text); font-weight: 700; font-size: 13px; }
+    button:hover { border-color: var(--cp-border-strong); }
+    button.primary { background: var(--cp-accent); color: var(--cp-accent-fg); border-color: var(--cp-accent); }
+    button.primary:hover { background: var(--cp-accent-hover); }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .dashboard { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 16px; align-items: stretch; }
+    .field-card, .side-card, .notes, .settings, .charts { background: var(--cp-surface); border: 1px solid var(--cp-border); border-radius: 16px; }
+    .field-card { overflow: hidden; }
+    .field-top { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 20px 22px; }
+    .field-title { font-size: 14px; font-weight: 700; }
+    .field-subtitle { margin-top: 3px; font-size: 12px; color: var(--cp-text-muted); }
+    .status { display: inline-flex; gap: 8px; align-items: center; white-space: nowrap; color: var(--cp-text-muted); font-size: 12px; font-weight: 700; }
+    .status-dot, .legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; background: var(--cp-success); }
+    .status[data-state="paused"] .status-dot { background: var(--cp-warning); }
+    .status[data-state="ended"] .status-dot { background: var(--cp-text-muted); }
+    .canvas-wrap { position: relative; background: var(--cp-bg-elevated); border-top: 1px solid var(--cp-border); border-bottom: 1px solid var(--cp-border); }
+    canvas { display: block; width: 100%; aspect-ratio: 960 / 560; }
+    .field-footer { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 17px 22px; color: var(--cp-text-muted); font-size: 12px; }
+    .legend { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+    .legend-item { display: inline-flex; align-items: center; gap: 7px; }
+    .legend-dot.fed { background: var(--cp-success); }
+    .legend-dot.hungry { background: var(--cp-warning); }
+    .legend-dot.starving { background: var(--cp-danger); }
+    .legend-dot.food { background: var(--cp-link); width: 7px; height: 7px; }
+    .legend-dot.shelter { background: var(--cp-success); border: 2px solid var(--cp-border-strong); width: 9px; height: 9px; }
+    .legend-dot.predator { background: var(--cp-text); }
+    .side-card { padding: 22px; display: flex; flex-direction: column; }
+    .section-label { color: var(--cp-text-soft); margin: 0; }
+    .elapsed-number { font-size: 32px; font-weight: 700; letter-spacing: -.04em; margin: 12px 0 3px; font-variant-numeric: tabular-nums; }
+    .small { color: var(--cp-text-muted); font-size: 12px; line-height: 1.5; }
+    .progress { height: 5px; background: var(--cp-surface-soft); border-radius: 10px; margin: 18px 0 24px; overflow: hidden; }
+    .progress span { display: block; height: 100%; width: 100%; background: var(--cp-accent); border-radius: inherit; }
+    .stats { border-top: 1px solid var(--cp-border); }
+    .stat { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--cp-border); padding: 17px 0; font-size: 13px; color: var(--cp-text-muted); }
+    .stat strong { color: var(--cp-text); font-size: 20px; font-variant-numeric: tabular-nums; }
+    .side-foot { margin-top: auto; padding-top: 24px; }
+    .side-foot p { margin: 8px 0 0; }
+    .world-seed { overflow-wrap: anywhere; }
+    .settings, .charts { margin-top: 16px; padding: 22px; }
+    .section-heading { font-size: 16px; font-weight: 700; margin: 0 0 5px; }
+    .settings-intro { margin: 0 0 18px; }
+    .settings-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+    .control { display: flex; flex-direction: column; gap: 7px; color: var(--cp-text-muted); font-size: 12px; font-weight: 700; }
+    .control input, .control select { min-width: 0; width: 100%; height: 40px; padding: 0 10px; border: 1px solid var(--cp-border); border-radius: .625rem; background: var(--cp-surface); color: var(--cp-text); }
+    .control input:disabled { background: var(--cp-surface-soft); color: var(--cp-text-soft); cursor: not-allowed; }
+    .control input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--cp-accent); }
+    .check { display: flex; align-items: center; gap: 8px; align-self: end; min-height: 40px; }
+    .check input { flex: none; }
+    .settings-help { margin: 12px 0 0; }
+    .settings-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+    .settings-actions .small { margin: 0; }
+    .interaction { border-top: 1px solid var(--cp-border); padding: 16px 22px; display: flex; align-items: end; gap: 14px; flex-wrap: wrap; }
+    .interaction .control { min-width: 160px; flex: 1; }
+    .interaction .small { flex: 2; min-width: 180px; margin: 0; }
+    #habitat { cursor: crosshair; }
+    .inspector { border-top: 1px solid var(--cp-border); padding: 16px 22px; }
+    .inspector p { margin: 8px 0 0; }
+    .chart-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+    .chart { border: 1px solid var(--cp-border); border-radius: .625rem; padding: 14px; min-width: 0; }
+    .chart h3 { font-size: 13px; margin: 0 0 4px; }
+    .chart p { margin: 0; min-height: 36px; }
+    .chart canvas { aspect-ratio: 300 / 120; margin-top: 10px; }
+    .chart-key { display: flex; flex-wrap: wrap; gap: 6px 12px; list-style: none; margin: 10px 0 0; padding: 0; color: var(--cp-text-muted); font-size: 12px; }
+    .chart-key li { display: inline-flex; align-items: center; gap: 6px; }
+    .chart-key-line { width: 16px; height: 3px; flex: none; background: var(--chart-key-color); }
+    .notes { margin-top: 16px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 28px; padding: 24px; }
+    .note-number { color: var(--cp-accent); font: 700 11px Consolas, "Courier New", Courier, monospace; }
+    .note-title { font-weight: 700; font-size: 13px; margin: 8px 0 5px; }
+    .note-copy { color: var(--cp-text-muted); font-size: 12px; line-height: 1.6; margin: 0; }
+    .bottom { color: var(--cp-text-soft); font-size: 11px; margin-top: 20px; }
+    .ciaops-footer { margin-top: 16px; display: grid; gap: 8px; border: 1px solid var(--cp-border); border-radius: 12px; background: linear-gradient(180deg, var(--cp-surface-soft), var(--cp-bg-elevated)); padding: 12px; }
+    .ciaops-footer-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+    .ciaops-footer-title { margin: 0; font-size: 0.84rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--cp-text); }
+    .ciaops-footer-links { display: flex; flex-wrap: wrap; gap: 6px; }
+    .ciaops-footer-link { display: inline-flex; align-items: center; border: 1px solid var(--cp-border-strong); border-radius: 999px; padding: 3px 10px; font-size: 0.74rem; color: var(--cp-link); background: var(--cp-surface); text-decoration: none; }
+    .ciaops-footer-link:hover { border-color: var(--cp-link); background: var(--cp-accent-soft); }
+    .ciaops-footer-copy { margin: 0; border-top: 1px dashed var(--cp-border); padding-top: 8px; font-size: 0.76rem; line-height: 1.35; color: var(--cp-text-soft); }
+    .ciaops-footer-version { margin: 0; font-size: 0.72rem; line-height: 1.35; color: var(--cp-text-muted); }
+    @media (max-width: 800px) {
+      .shell { padding: 20px 16px 32px; }
+      .intro { padding-top: 42px; align-items: start; flex-direction: column; }
+      .dashboard { grid-template-columns: 1fr; }
+      .side-card { display: block; }
+      .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+      .stat { display: block; }
+      .stat strong { display: block; margin-top: 5px; }
+      .side-foot { padding-top: 16px; }
+      .notes { gap: 16px; }
+      .settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .chart-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 520px) {
+      .notes { grid-template-columns: 1fr; }
+      .field-top { padding: 16px; }
+      .field-footer { padding: 14px 16px; }
+      .legend { gap: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true">✳</span> THE LITTLE LIFE LAB</a>
+      <a class="back" href="index.html">← Office365 Docs hub</a>
+    </header>
+    <section class="intro">
+      <div>
+        <p class="eyebrow">A tiny world, in motion</p>
+        <h1>Grow bugs<span style="color: var(--cp-accent)">.</span></h1>
+        <p class="intro-copy">A little experiment in movement, meals, and staying alive.</p>
+      </div>
+      <div class="actions">
+        <button id="pause" type="button">Pause</button>
+        <button id="restart" class="primary" type="button">↻ &nbsp; New world</button>
+      </div>
+    </section>
+
+    <div class="dashboard">
+      <section class="field-card" aria-label="Bug habitat">
+        <div class="field-top">
+          <div><div class="field-title">The habitat</div><div class="field-subtitle" id="habitat-description">A small world with a finite food supply</div></div>
+          <div id="status" class="status" data-state="running" role="status"><span class="status-dot"></span><span id="status-text">Simulation running</span></div>
+        </div>
+        <div class="canvas-wrap">
+          <canvas id="habitat" width="960" height="560" aria-label="Animated habitat showing bugs moving and eating food"></canvas>
+        </div>
+        <div class="field-footer">
+          <div class="legend">
+            <span class="legend-item"><span class="legend-dot fed"></span> Green: health at least 75% of one food portion</span>
+            <span class="legend-item"><span class="legend-dot hungry"></span> Hungry</span>
+            <span class="legend-item"><span class="legend-dot starving"></span> Near starvation</span>
+            <span class="legend-item"><span class="legend-dot food"></span> Food</span>
+            <span class="legend-item"><span class="legend-dot shelter"></span> Shelter</span>
+            <span class="legend-item"><span class="legend-dot predator"></span> Predator</span>
+          </div>
+          <span>Each dot has a story.</span>
+        </div>
+        <div class="interaction">
+          <label class="control">Habitat click
+            <select id="click-mode"><option value="inspect">Inspect a bug</option><option value="food">Add food</option></select>
+          </label>
+          <label class="control">Select a bug
+            <select id="bug-select"><option value="">None selected</option></select>
+          </label>
+          <button id="sprinkle" type="button">Sprinkle food</button>
+          <p class="small" id="interaction-hint">Click a bug or choose one from the list to inspect it.</p>
+          <p class="small" id="sprinkle-status" role="status">Sprinkle up to 15 pieces anywhere in the habitat (300 maximum).</p>
+        </div>
+      </section>
+      <aside class="side-card" aria-label="Simulation statistics">
+        <p class="section-label">Time elapsed</p>
+        <div class="elapsed-number"><span id="elapsed">0.0</span>s</div>
+        <div class="small">Average time remaining: <span id="average-life">15.0</span>s</div>
+        <div class="progress" role="progressbar" aria-label="Average bug health relative to one food portion" aria-valuemin="0" aria-valuemax="15" aria-valuenow="15"><span id="progress"></span></div>
+        <div class="stats">
+          <div class="stat"><span>Living bugs</span><strong id="bugs">0</strong></div>
+          <div class="stat"><span>Food left</span><strong id="food">0</strong></div>
+          <div class="stat"><span>Bugs replaced</span><strong id="replaced">0</strong></div>
+          <div class="stat"><span>Contact births</span><strong id="contact-births">0</strong></div>
+          <div class="stat"><span>Starvation</span><strong id="starvation-deaths">0</strong></div>
+          <div class="stat"><span>Predation</span><strong id="predation-deaths">0</strong></div>
+        </div>
+        <div class="side-foot">
+          <p class="section-label">Selected bug</p>
+          <p class="small" id="inspector" role="status">No bug selected. Click one in the habitat or choose one from the list.</p>
+          <p class="small world-seed">Active seed: <strong id="active-seed"></strong></p>
+        </div>
+      </aside>
+    </div>
+
+    <form class="settings" id="settings">
+      <h2 class="section-heading">Set up an experiment</h2>
+      <p class="small settings-intro">Settings apply when you start or replay a world. Simulation speed, habitat clicks, and sprinkling work immediately.</p>
+      <div class="settings-grid">
+        <label class="control">Starting bugs (1–100)
+          <input id="start-bugs" type="number" min="1" max="100" step="1" placeholder="Random: 14–24">
+        </label>
+        <label class="control">Starting food (0–300)
+          <input id="start-food" type="number" min="0" max="300" step="1" placeholder="Random: 90–150">
+        </label>
+        <label class="control">Starting health / value of each food (5–120)
+          <input id="bug-lifetime" type="number" min="5" max="120" step="1" value="15" required>
+        </label>
+        <label class="control">Simulation speed
+          <select id="sim-speed"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select>
+        </label>
+        <label class="control">World seed
+          <input id="seed" type="text" maxlength="80" required>
+        </label>
+        <label class="control">Food supply
+          <select id="food-mode"><option value="renewable">Renewable</option><option value="finite">Finite</option></select>
+        </label>
+        <label class="control">Renewal amount (1–300)
+          <input id="renewal-amount" type="number" min="1" max="300" step="1" value="15" required>
+        </label>
+        <label class="control">Renewal interval (1–120 seconds)
+          <input id="renewal-interval" type="number" min="1" max="120" step="1" value="15" required>
+        </label>
+        <label class="control check"><input id="evolution" type="checkbox" aria-describedby="evolution-help"> Enable mutation and inherited replacements</label>
+        <label class="control check"><input id="replace-starved" type="checkbox" aria-describedby="replacement-help"> Replace starved bugs</label>
+        <label class="control">Terrain
+          <select id="terrain-mode"><option value="mixed">Walls, obstacles & shelters</option><option value="open">Open habitat</option></select>
+        </label>
+        <label class="control">Predators (0–8)
+          <input id="predator-count" type="number" min="0" max="8" step="1" value="2" required>
+        </label>
+      </div>
+      <p class="small settings-help" id="evolution-help">Contact-born babies always inherit one parent's genes. When enabled, inherited genes can mutate and replacements inherit from a survivor; otherwise replacements have random genes.</p>
+      <p class="small settings-help" id="replacement-help">Only starved bugs are replaced, not those killed by predators. No replacements are created if all bugs die in the same step.</p>
+      <div class="settings-actions">
+        <button type="submit">Replay seed</button>
+        <button id="new-seed" type="button">Generate seed &amp; start</button>
+        <p class="small">Leave replacements off for a finite run that ends at extinction. Renewal settings apply only to renewable food; replay uses the same seed and settings.</p>
+      </div>
+    </form>
+
+    <section class="charts" aria-label="Simulation statistics over time">
+      <h2 class="section-heading">Life over time</h2>
+      <p class="small">Points are sampled every 5 simulation seconds (the last sample may be shorter). Population shows the living count, births, starvation, and predation; generations shows average generation depth. The selection card reports changes from the first surviving sample.</p>
+      <div class="chart-grid">
+        <article class="chart"><h3>Survival</h3><p class="small" id="survival-summary">No samples yet.</p><canvas id="survival-chart" width="300" height="120" role="img" aria-label="Survival percentage over time"></canvas></article>
+        <article class="chart"><h3>Average speed</h3><p class="small" id="speed-summary">No samples yet.</p><canvas id="speed-chart" width="300" height="120" role="img" aria-label="Average speed of living bugs over time"></canvas></article>
+        <article class="chart"><h3>Food consumed</h3><p class="small" id="food-summary">No samples yet.</p><canvas id="food-chart" width="300" height="120" role="img" aria-label="Food consumed over time"></canvas></article>
+        <article class="chart">
+          <h3>Population</h3><p class="small" id="population-summary">No samples yet.</p>
+          <canvas id="population-chart" width="300" height="120" role="img" aria-label="Population, births, starvation, and predation over time"></canvas>
+          <ul class="chart-key" aria-label="Population chart colour key">
+            <li data-series="population"><span class="chart-key-line" style="--chart-key-color: var(--cp-link)" aria-hidden="true"></span>Living</li>
+            <li data-series="births"><span class="chart-key-line" style="--chart-key-color: var(--cp-success)" aria-hidden="true"></span>Births</li>
+            <li data-series="starvation"><span class="chart-key-line" style="--chart-key-color: var(--cp-warning)" aria-hidden="true"></span>Starved</li>
+            <li data-series="predation"><span class="chart-key-line" style="--chart-key-color: var(--cp-danger)" aria-hidden="true"></span>Hunted</li>
+          </ul>
+        </article>
+        <article class="chart"><h3>Generations</h3><p class="small" id="generation-summary">No samples yet.</p><canvas id="generation-chart" width="300" height="120" role="img" aria-label="Average generation over time"></canvas></article>
+        <article class="chart">
+          <h3>Natural selection</h3><p class="small" id="selection-summary">Collecting trait data.</p>
+          <canvas id="selection-chart" width="300" height="120" role="img" aria-label="Change in average speed and turn rate over time"></canvas>
+          <ul class="chart-key" aria-label="Natural selection chart colour key">
+            <li data-series="speedChange"><span class="chart-key-line" style="--chart-key-color: var(--cp-link)" aria-hidden="true"></span>Speed change</li>
+            <li data-series="turnChange"><span class="chart-key-line" style="--chart-key-color: var(--cp-warning)" aria-hidden="true"></span>Turn rate change</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="notes" aria-label="How the simulation works">
+      <div><span class="note-number">01 / EXPLORE</span><p class="note-title">A repeatable beginning</p><p class="note-copy">Leave starting counts blank for random amounts. A seed and the same settings recreate the same world.</p></div>
+      <div><span class="note-number">02 / SURVIVE</span><p class="note-title">Build up some health</p><p class="note-copy">Health starts at one food portion and drains continuously. Every blue food pill adds another full portion, so a well-fed bug can survive far longer. Bugs turn amber and red as their final portion runs low.</p></div>
+      <div><span class="note-number">03 / BEGIN AGAIN</span><p class="note-title">Life finds a way</p><p class="note-copy">Two green bugs need stored meals to produce a child that inherits one parent's movement genes. Enable mutation and inherited replacements to introduce variations and give replacements a survivor's genes. With replacement off, deaths reduce the population and finite worlds end when the last bug dies.</p></div>
+    </section>
+    <p class="bottom">A simple simulation, not a scientific model.</p>
+    <section class="ciaops-footer" aria-label="CIAOPS footer branding">
+      <div class="ciaops-footer-head">
+        <p class="ciaops-footer-title">CIAOPS</p>
+        <nav class="ciaops-footer-links" aria-label="CIAOPS contact and training links">
+          <a class="ciaops-footer-link" href="mailto:director@ciaops.com">Contact</a>
+          <a class="ciaops-footer-link" href="https://www.ciaopspatron.com/" target="_blank" rel="noopener noreferrer">Training and Resources</a>
+          <a class="ciaops-footer-link" href="https://blog.ciaops.com/" target="_blank" rel="noopener noreferrer">Blog</a>
+          <a class="ciaops-footer-link" href="https://github.com/directorcia/Office365" target="_blank" rel="noopener noreferrer">Scripts</a>
+        </nav>
+      </div>
+      <p class="ciaops-footer-copy">Copyright © <span id="ciaopsYear"></span> CIAOPS. All rights reserved.</p>
+      <p class="ciaops-footer-version" id="footerVersion">Version: loading...</p>
+    </section>
+  </main>
+  <script>
+    (() => {
+      document.getElementById("ciaopsYear").textContent = String(new Date().getFullYear());
+      const lastModifiedValue = new Date(document.lastModified);
+      const modifiedDate = Number.isNaN(lastModifiedValue.getTime()) ? new Date() : lastModifiedValue;
+      const year = modifiedDate.getFullYear();
+      const month = String(modifiedDate.getMonth() + 1).padStart(2, "0");
+      const day = String(modifiedDate.getDate()).padStart(2, "0");
+      const hours = String(modifiedDate.getHours()).padStart(2, "0");
+      const minutes = String(modifiedDate.getMinutes()).padStart(2, "0");
+      const versionToken = `v${year}.${month}.${day}.${hours}${minutes}`;
+      const formattedDate = modifiedDate.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+      document.getElementById("footerVersion").textContent = `Version: ${versionToken} | Last updated: ${formattedDate}`;
+
+      const width = 960;
+      const height = 560;
+      const step = .05;
+      const sampleSteps = 100;
+      const populationLimit = 100;
+      const foodLimit = 300;
+      const sprinkleAmount = 15;
+      const canvas = document.getElementById("habitat");
+      const ctx = canvas.getContext("2d");
+      const settings = document.getElementById("settings");
+      const pauseButton = document.getElementById("pause");
+      const seedInput = document.getElementById("seed");
+      const foodMode = document.getElementById("food-mode");
+      const clickMode = document.getElementById("click-mode");
+      const bugSelect = document.getElementById("bug-select");
+      const inspector = document.getElementById("inspector");
+      const status = document.getElementById("status");
+      const statusText = document.getElementById("status-text");
+      const elapsedEl = document.getElementById("elapsed");
+      const averageLifeEl = document.getElementById("average-life");
+      const bugsEl = document.getElementById("bugs");
+      const foodEl = document.getElementById("food");
+      const replacedEl = document.getElementById("replaced");
+      const contactBirthsEl = document.getElementById("contact-births");
+      const starvationDeathsEl = document.getElementById("starvation-deaths");
+      const predationDeathsEl = document.getElementById("predation-deaths");
+      const progress = document.getElementById("progress");
+      const progressBar = progress.parentElement;
+      const colors = getComputedStyle(document.documentElement);
+      const color = (name) => colors.getPropertyValue(name).trim();
+      const rgb = (name) => {
+        const hex = color(name);
+        return [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16));
+      };
+      const fedColor = rgb("--cp-success");
+      const hungryColor = rgb("--cp-warning");
+      const starvingColor = rgb("--cp-danger");
+      function bugColor(lifeFraction) {
+        const remaining = Math.max(0, Math.min(1, lifeFraction));
+        const from = remaining > .5 ? hungryColor : starvingColor;
+        const to = remaining > .5 ? fedColor : hungryColor;
+        const blend = remaining > .5 ? Math.min(1, (remaining - .5) * 4) : Math.max(0, (remaining - .1) / .4);
+        return `rgb(${from.map((channel, i) => Math.round(channel + (to[i] - channel) * blend)).join(", ")})`;
+      }
+      let randomValue;
+      const random = (min, max) => min + randomValue() * (max - min);
+      const randomInt = (min, max) => Math.floor(random(min, max + 1));
+      let bugs, food, predators, terrain, elapsedSteps, replaced, contactBirths, starvationDeaths, predationDeaths;
+      let activeContacts, state, lastTime, accumulator, birthsSinceSample, starvationSinceSample, predationSinceSample;
+      let config, nextId, selectedId, eatenSinceSample, sampleCohort, sampleStartCount, history, baselineTraits;
+
+      function seededRandom(seed) {
+        let value = 2166136261;
+        for (let i = 0; i < seed.length; i++) {
+          value = Math.imul(value ^ seed.charCodeAt(i), 16777619);
+        }
+        return () => {
+          value = (value + 0x6d2b79f5) | 0;
+          let result = Math.imul(value ^ value >>> 15, 1 | value);
+          result ^= result + Math.imul(result ^ result >>> 7, 61 | result);
+          return ((result ^ result >>> 14) >>> 0) / 4294967296;
+        };
+      }
+
+      function generateSeed() {
+        return Math.floor(Math.random() * 4294967296).toString(36);
+      }
+
+      function resizeCanvas(element, context, logicalWidth, logicalHeight) {
+        const bounds = element.getBoundingClientRect();
+        if (!bounds.width || !bounds.height) return;
+        const pixelRatio = window.devicePixelRatio || 1;
+        const pixelWidth = Math.max(1, Math.round(bounds.width * pixelRatio));
+        const pixelHeight = Math.max(1, Math.round(bounds.height * pixelRatio));
+        if (element.width !== pixelWidth) element.width = pixelWidth;
+        if (element.height !== pixelHeight) element.height = pixelHeight;
+        context.setTransform(pixelWidth / logicalWidth, 0, 0, pixelHeight / logicalHeight, 0, 0);
+      }
+
+      function updateRenewalControls() {
+        const disabled = foodMode.value !== "renewable";
+        document.getElementById("renewal-amount").disabled = disabled;
+        document.getElementById("renewal-interval").disabled = disabled;
+      }
+
+      function pointInCircle(x, y, circle, margin = 0) {
+        return Math.hypot(x - circle.x, y - circle.y) < circle.r + margin;
+      }
+
+      function pointInRect(x, y, rect, margin = 0) {
+        const nearestX = Math.max(rect.x, Math.min(x, rect.x + rect.w));
+        const nearestY = Math.max(rect.y, Math.min(y, rect.y + rect.h));
+        return Math.hypot(x - nearestX, y - nearestY) < margin;
+      }
+
+      function isBlocked(x, y, radius) {
+        return terrain.walls.some((rect) => pointInRect(x, y, rect, radius))
+          || terrain.obstacles.some((circle) => pointInCircle(x, y, circle, radius));
+      }
+
+      function inShelter(bug) {
+        return terrain.shelters.some((shelter) => pointInCircle(bug.x, bug.y, shelter));
+      }
+
+      function randomPoint(radius = 12) {
+        for (let attempt = 0; attempt < 80; attempt++) {
+          const point = { x: random(16, width - 16), y: random(16, height - 16) };
+          if (!isBlocked(point.x, point.y, radius)) return point;
+        }
+        return { x: 24, y: 24 };
+      }
+
+      function buildTerrain() {
+        if (document.getElementById("terrain-mode").value === "open") {
+          return { walls: [], obstacles: [], shelters: [], foodZones: [] };
+        }
+        const walls = [
+          { x: 265 + random(-18, 18), y: 100, w: 18, h: 170 },
+          { x: 665 + random(-18, 18), y: 290, w: 18, h: 170 },
+          { x: 390, y: 420 + random(-12, 12), w: 190, h: 18 }
+        ];
+        const obstacles = [
+          { x: 485 + random(-20, 20), y: 145 + random(-15, 15), r: 30 },
+          { x: 155 + random(-15, 15), y: 405 + random(-12, 12), r: 26 },
+          { x: 795 + random(-15, 15), y: 125 + random(-12, 12), r: 22 }
+        ];
+        const shelters = [
+          { x: 110, y: 100, r: 45 },
+          { x: 830, y: 455, r: 45 }
+        ];
+        const foodZones = [
+          { x: 450, y: 285, r: 90 },
+          { x: 850, y: 110, r: 65 }
+        ];
+        return { walls, obstacles, shelters, foodZones };
+      }
+
+      function newBug(parent) {
+        const spawn = randomPoint(13);
+        const angle = random(0, Math.PI * 2);
+        const speedMutation = parent && config.evolution ? random(.9, 1.1) : 1;
+        const turnMutation = parent && config.evolution ? random(.9, 1.1) : 1;
+        const speed = parent ? Math.max(12, Math.min(110, parent.genes.speed * speedMutation)) : random(24, 76);
+        const turnSpeed = parent ? Math.max(.15, Math.min(3.5, parent.genes.turnSpeed * turnMutation)) : random(.35, 2.4);
+        return {
+          id: nextId++,
+          parentId: parent ? parent.id : null,
+          x: spawn.x, y: spawn.y,
+          angle,
+          speed,
+          turnSpeed,
+          genes: { speed, turnSpeed },
+          turnDirection: randomValue() < .5 ? -1 : 1,
+          turnTimer: random(.4, 2.5), life: config.lifetime, meals: 0, birthEnergy: 0,
+          generation: parent ? parent.generation + 1 : 1
+        };
+      }
+
+      const bugRadius = (bug) => 8 + Math.min(bug.meals, 5);
+      const isGreen = (bug) => bug.life + .000001 >= config.lifetime * .75;
+      const canBreed = (bug) => isGreen(bug) && bug.birthEnergy > 0;
+      const contactKey = (a, b) => a.id < b.id ? `${a.id}:${b.id}` : `${b.id}:${a.id}`;
+      const touching = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) <= bugRadius(a) + bugRadius(b);
+
+      function addRandomFood(count) {
+        const before = food.length;
+        for (let i = 0; i < count && food.length < foodLimit; i++) {
+          let point;
+          if (terrain.foodZones.length && randomValue() < .55) {
+            const zone = terrain.foodZones[randomInt(0, terrain.foodZones.length - 1)];
+            const angle = random(0, Math.PI * 2);
+            const distance = Math.sqrt(randomValue()) * zone.r;
+            point = { x: zone.x + Math.cos(angle) * distance, y: zone.y + Math.sin(angle) * distance };
+            if (isBlocked(point.x, point.y, 5)) point = randomPoint(5);
+          } else point = randomPoint(5);
+          food.push(point);
+        }
+        return food.length - before;
+      }
+
+      function newPredators() {
+        return Array.from({ length: config.predatorCount }, (_, index) => {
+          const point = randomPoint(22);
+          return { id: index + 1, x: point.x, y: point.y, angle: random(0, Math.PI * 2), speed: random(38, 58), turnSpeed: random(.7, 1.4) };
+        });
+      }
+
+      function updateInteractionHint() {
+        document.getElementById("interaction-hint").textContent = clickMode.value === "food"
+          ? `Click the habitat to add food (up to 300 pieces).${state === "ended" ? " An ended world cannot be revived." : ""}`
+          : "Click a bug or choose one from the list to inspect it.";
+      }
+
+      function newWorld(generateNewSeed = false) {
+        if (!settings.reportValidity()) return;
+        if (generateNewSeed) seedInput.value = generateSeed();
+        config = {
+          lifetime: Number(document.getElementById("bug-lifetime").value),
+          renewable: foodMode.value === "renewable",
+          renewalAmount: Number(document.getElementById("renewal-amount").value),
+          renewalSteps: Math.round(Number(document.getElementById("renewal-interval").value) / step),
+          evolution: document.getElementById("evolution").checked,
+          replaceStarved: document.getElementById("replace-starved").checked,
+          predatorCount: Number(document.getElementById("predator-count").value)
+        };
+        randomValue = seededRandom(seedInput.value);
+        const bugInput = document.getElementById("start-bugs").value;
+        const foodInput = document.getElementById("start-food").value;
+        const bugCount = bugInput === "" ? randomInt(14, 24) : Number(bugInput);
+        const foodCount = foodInput === "" ? randomInt(90, 150) : Number(foodInput);
+        terrain = buildTerrain();
+        nextId = 1;
+        bugs = Array.from({ length: bugCount }, () => newBug());
+        food = [];
+        addRandomFood(foodCount);
+        elapsedSteps = 0;
+        replaced = 0;
+        contactBirths = 0;
+        starvationDeaths = 0;
+        predationDeaths = 0;
+        activeContacts = new Set();
+        selectedId = null;
+        eatenSinceSample = 0;
+        birthsSinceSample = 0;
+        starvationSinceSample = 0;
+        predationSinceSample = 0;
+        sampleCohort = new Set(bugs.map((bug) => bug.id));
+        sampleStartCount = bugs.length;
+        history = [];
+        baselineTraits = null;
+        predators = newPredators();
+        state = "running";
+        lastTime = null;
+        accumulator = 0;
+        progressBar.setAttribute("aria-valuemax", config.lifetime);
+        document.getElementById("active-seed").textContent = seedInput.value;
+        const terrainLabel = terrain.walls.length ? " with terrain" : "";
+        document.getElementById("habitat-description").textContent = `${config.renewable ? "A renewable" : "A finite"} habitat${terrainLabel}${predators.length ? ` and ${predators.length} predator${predators.length === 1 ? "" : "s"}` : ""}`;
+        document.getElementById("sprinkle-status").textContent = "Sprinkle up to 15 pieces anywhere in the habitat (300 maximum).";
+        updateInteractionHint();
+        refreshBugSelect();
+        updateUI();
+        draw();
+        drawCharts();
+      }
+
+      function refreshBugSelect() {
+        const options = [new Option("None selected", "")];
+        for (const bug of bugs) {
+          options.push(new Option(`Bug #${bug.id} · Gen ${bug.generation} · Speed ${bug.genes.speed.toFixed(1)} units/s · Turn ${bug.genes.turnSpeed.toFixed(2)} rad/s`, String(bug.id)));
+        }
+        bugSelect.replaceChildren(...options);
+        bugSelect.value = selectedId === null ? "" : String(selectedId);
+      }
+
+      function updateInspector() {
+        const bug = bugs.find((item) => item.id === selectedId);
+        const text = bug
+          ? `Bug #${bug.id} · ${bug.parentId === null ? "Random origin" : `Parent #${bug.parentId}`} · Generation ${bug.generation} · Speed gene ${bug.genes.speed.toFixed(1)} units/s · Turn gene ${bug.genes.turnSpeed.toFixed(2)} rad/s · Meals ${bug.meals} · Birth energy ${bug.birthEnergy} · Health ${Math.max(0, bug.life).toFixed(1)}`
+          : "No bug selected. Click one in the habitat or choose one from the list.";
+        if (inspector.textContent !== text) inspector.textContent = text;
+      }
+
+      function updateUI() {
+        const averageLife = bugs.length ? bugs.reduce((sum, bug) => sum + bug.life, 0) / bugs.length : 0;
+        elapsedEl.textContent = (elapsedSteps * step).toFixed(1);
+        averageLifeEl.textContent = averageLife.toFixed(1);
+        bugsEl.textContent = bugs.length;
+        foodEl.textContent = food.length;
+        replacedEl.textContent = replaced;
+        contactBirthsEl.textContent = contactBirths;
+        starvationDeathsEl.textContent = starvationDeaths;
+        predationDeathsEl.textContent = predationDeaths;
+        progress.style.width = `${Math.min(100, averageLife / config.lifetime * 100)}%`;
+        progressBar.setAttribute("aria-valuemax", Math.max(config.lifetime, averageLife).toFixed(1));
+        progressBar.setAttribute("aria-valuenow", averageLife.toFixed(1));
+        status.dataset.state = state;
+        statusText.textContent = state === "running" ? "Simulation running" : state === "paused" ? "Simulation paused" : "No bugs survived";
+        pauseButton.textContent = state === "paused" ? "Resume" : "Pause";
+        pauseButton.disabled = state === "ended";
+        updateInspector();
+      }
+
+      function recordSample() {
+        const averageSpeed = bugs.length ? bugs.reduce((sum, bug) => sum + bug.speed, 0) / bugs.length : null;
+        const averageTurn = bugs.length ? bugs.reduce((sum, bug) => sum + bug.turnSpeed, 0) / bugs.length : null;
+        const averageGeneration = bugs.length ? bugs.reduce((sum, bug) => sum + bug.generation, 0) / bugs.length : 0;
+        if (!baselineTraits && averageSpeed !== null) baselineTraits = { speed: averageSpeed, turn: averageTurn };
+        history.push({
+          time: elapsedSteps * step,
+          survival: sampleStartCount ? sampleCohort.size / sampleStartCount * 100 : 0,
+          speed: averageSpeed,
+          turn: averageTurn,
+          generation: averageGeneration,
+          population: bugs.length,
+          births: birthsSinceSample,
+          starvation: starvationSinceSample,
+          predation: predationSinceSample,
+          speedChange: baselineTraits ? (averageSpeed - baselineTraits.speed) / baselineTraits.speed * 100 : 0,
+          turnChange: baselineTraits ? (averageTurn - baselineTraits.turn) / baselineTraits.turn * 100 : 0,
+          food: eatenSinceSample
+        });
+        if (history.length > 120) history.shift();
+        sampleCohort = new Set(bugs.map((bug) => bug.id));
+        sampleStartCount = bugs.length;
+        eatenSinceSample = 0;
+        birthsSinceSample = 0;
+        starvationSinceSample = 0;
+        predationSinceSample = 0;
+        drawCharts();
+      }
+
+      function update(dt) {
+        const newbornIds = new Set();
+        for (const bug of bugs) {
+          bug.life -= dt;
+          bug.turnTimer -= dt;
+          let nearestPredator = null;
+          let predatorDistance = Infinity;
+          for (const predator of predators) {
+            const distance = Math.hypot(predator.x - bug.x, predator.y - bug.y);
+            if (distance < predatorDistance) { nearestPredator = predator; predatorDistance = distance; }
+          }
+          if (bug.turnTimer <= 0) {
+            bug.turnDirection = randomValue() < .5 ? -1 : 1;
+            bug.turnTimer = random(.4, 2.5);
+          }
+          bug.angle += bug.turnDirection * bug.turnSpeed * dt;
+          if (nearestPredator && predatorDistance < 120 && !inShelter(bug)) {
+            const escapeAngle = Math.atan2(bug.y - nearestPredator.y, bug.x - nearestPredator.x);
+            const difference = Math.atan2(Math.sin(escapeAngle - bug.angle), Math.cos(escapeAngle - bug.angle));
+            bug.angle += Math.max(-bug.turnSpeed * dt * 3, Math.min(bug.turnSpeed * dt * 3, difference));
+          }
+          const oldX = bug.x;
+          const oldY = bug.y;
+          bug.x += Math.cos(bug.angle) * bug.speed * dt;
+          bug.y += Math.sin(bug.angle) * bug.speed * dt;
+          if (isBlocked(bug.x, bug.y, bugRadius(bug))) {
+            bug.x = oldX;
+            bug.y = oldY;
+            bug.angle += Math.PI * random(.65, 1.35);
+          }
+          if (bug.x < 8 || bug.x > width - 8) {
+            bug.x = Math.max(8, Math.min(width - 8, bug.x));
+            bug.angle = Math.PI - bug.angle;
+          }
+          if (bug.y < 8 || bug.y > height - 8) {
+            bug.y = Math.max(8, Math.min(height - 8, bug.y));
+            bug.angle = -bug.angle;
+          }
+          const radius = bugRadius(bug);
+          for (let i = food.length - 1; i >= 0; i--) {
+            if (Math.hypot(bug.x - food[i].x, bug.y - food[i].y) < radius + 3) {
+              food.splice(i, 1);
+              bug.life += config.lifetime;
+              bug.meals += 1;
+              bug.birthEnergy += 1;
+              eatenSinceSample += 1;
+            }
+          }
+        }
+        for (const predator of predators) {
+          let target = null;
+          let targetDistance = Infinity;
+          for (const bug of bugs) {
+            if (inShelter(bug)) continue;
+            const distance = Math.hypot(bug.x - predator.x, bug.y - predator.y);
+            if (distance < targetDistance) { target = bug; targetDistance = distance; }
+          }
+          const desired = target ? Math.atan2(target.y - predator.y, target.x - predator.x) : predator.angle;
+          const difference = Math.atan2(Math.sin(desired - predator.angle), Math.cos(desired - predator.angle));
+          predator.angle += Math.max(-predator.turnSpeed * dt, Math.min(predator.turnSpeed * dt, difference));
+          const oldX = predator.x;
+          const oldY = predator.y;
+          predator.x += Math.cos(predator.angle) * predator.speed * dt;
+          predator.y += Math.sin(predator.angle) * predator.speed * dt;
+          if (isBlocked(predator.x, predator.y, 10)) {
+            predator.x = oldX;
+            predator.y = oldY;
+            predator.angle += Math.PI * random(.65, 1.35);
+          }
+          if (predator.x < 12 || predator.x > width - 12) {
+            predator.x = Math.max(12, Math.min(width - 12, predator.x));
+            predator.angle = Math.PI - predator.angle;
+          }
+          if (predator.y < 12 || predator.y > height - 12) {
+            predator.y = Math.max(12, Math.min(height - 12, predator.y));
+            predator.angle = -predator.angle;
+          }
+        }
+        elapsedSteps += 1;
+        const starved = bugs.filter((bug) => bug.life <= .000001);
+        const hunted = bugs.filter((bug) => bug.life > .000001 && !inShelter(bug)
+          && predators.some((predator) => Math.hypot(predator.x - bug.x, predator.y - bug.y) <= bugRadius(bug) + 10));
+        const deadIds = new Set([...starved, ...hunted].map((bug) => bug.id));
+        const survivors = bugs.filter((bug) => !deadIds.has(bug.id));
+        const lost = deadIds.size;
+        if (lost) {
+          for (const id of deadIds) sampleCohort.delete(id);
+          starvationDeaths += starved.length;
+          predationDeaths += hunted.length;
+          starvationSinceSample += starved.length;
+          predationSinceSample += hunted.length;
+          if (!survivors.length) {
+            bugs = [];
+            selectedId = null;
+            state = "ended";
+            updateInteractionHint();
+          } else {
+            const replacementCount = config.replaceStarved ? starved.length : 0;
+            const replacements = Array.from({ length: replacementCount }, () => newBug(config.evolution ? survivors[randomInt(0, survivors.length - 1)] : null));
+            replacements.forEach((bug) => newbornIds.add(bug.id));
+            replaced += replacementCount;
+            bugs = survivors.concat(replacements);
+            if (!survivors.some((bug) => bug.id === selectedId)) selectedId = null;
+          }
+        }
+        let births = 0;
+        if (state === "running") {
+          const currentContacts = new Set();
+          const encounters = [];
+          for (let i = 0; i < bugs.length; i++) {
+            for (let j = i + 1; j < bugs.length; j++) {
+              const a = bugs[i];
+              const b = bugs[j];
+              if (!touching(a, b)) continue;
+              const key = contactKey(a, b);
+              currentContacts.add(key);
+              if (!activeContacts.has(key) && !newbornIds.has(a.id) && !newbornIds.has(b.id) && canBreed(a) && canBreed(b)) encounters.push([a, b]);
+            }
+          }
+          for (const [a, b] of encounters) {
+            if (bugs.length >= populationLimit) break;
+            const parent = randomValue() < .5 ? a : b;
+            a.birthEnergy -= 1;
+            b.birthEnergy -= 1;
+            const child = newBug(parent);
+            child.x = (a.x + b.x) / 2;
+            child.y = (a.y + b.y) / 2;
+            for (const bug of bugs) {
+              if (touching(child, bug)) currentContacts.add(contactKey(child, bug));
+            }
+            bugs.push(child);
+            births += 1;
+            contactBirths += 1;
+            birthsSinceSample += 1;
+          }
+          activeContacts = currentContacts;
+          if (config.renewable && elapsedSteps % config.renewalSteps === 0) addRandomFood(config.renewalAmount);
+        }
+        if (lost || births) refreshBugSelect();
+        if (elapsedSteps % sampleSteps === 0 || state === "ended") recordSample();
+      }
+
+      function drawCharts() {
+        const charts = [
+          { id: "survival", unit: "%", maximum: 100, series: [{ key: "survival", color: "--cp-accent" }] },
+          { id: "speed", unit: " units/s", series: [{ key: "speed", color: "--cp-accent" }] },
+          { id: "food", unit: " pieces", series: [{ key: "food", color: "--cp-accent" }] },
+          { id: "population", unit: "", series: [
+            { key: "population", color: "--cp-link" },
+            { key: "births", color: "--cp-success" },
+            { key: "starvation", color: "--cp-warning" },
+            { key: "predation", color: "--cp-danger" }
+          ] },
+          { id: "generation", unit: " gen", series: [{ key: "generation", color: "--cp-accent" }] },
+          { id: "selection", unit: "% change", series: [
+            { key: "speedChange", color: "--cp-link" },
+            { key: "turnChange", color: "--cp-warning" }
+          ], signed: true }
+        ];
+        for (const chart of charts) {
+          const element = document.getElementById(`${chart.id}-chart`);
+          const graph = element.getContext("2d");
+          const summary = document.getElementById(`${chart.id}-summary`);
+          resizeCanvas(element, graph, 300, 120);
+          graph.clearRect(0, 0, 300, 120);
+          graph.strokeStyle = color("--cp-border");
+          graph.lineWidth = 1;
+          graph.beginPath(); graph.moveTo(12, 8); graph.lineTo(12, 108); graph.lineTo(292, 108); graph.stroke();
+          if (!history.length) {
+            summary.textContent = "No samples yet.";
+            element.setAttribute("aria-label", `${chart.id} over time. No samples yet.`);
+            continue;
+          }
+          const latest = history[history.length - 1];
+          const values = history.flatMap((item) => chart.series.map((series) => item[series.key])).filter((value) => value !== null);
+          const maxValue = chart.maximum || Math.max(1, ...values);
+          const minValue = chart.signed ? Math.min(0, ...values) : 0;
+          const range = maxValue - minValue || 1;
+          const display = chart.series.map((series) => {
+            const value = latest[series.key];
+            return value === null ? "n/a" : `${value.toFixed(chart.unit === "" || chart.unit === " pieces" ? 0 : 1)}${chart.unit}`;
+          }).join(" · ");
+          summary.textContent = chart.id === "population"
+            ? `At ${latest.time.toFixed(1)}s: ${latest.population} alive · ${latest.births} births · ${latest.starvation} starved · ${latest.predation} hunted`
+            : chart.id === "selection"
+              ? `At ${latest.time.toFixed(1)}s: speed ${latest.speedChange.toFixed(1)}% · turning ${latest.turnChange.toFixed(1)}%`
+              : `At ${latest.time.toFixed(1)}s: ${display} · scale ${minValue.toFixed(0)}–${maxValue.toFixed(chart.unit === " units/s" ? 1 : 0)}${chart.unit}`;
+          element.setAttribute("aria-label", `${chart.id} over time. ${summary.textContent}`);
+          if (chart.signed) {
+            graph.strokeStyle = color("--cp-border-strong");
+            graph.setLineDash([3, 3]);
+            const zeroY = 108 - (0 - minValue) / range * 96;
+            graph.beginPath(); graph.moveTo(12, zeroY); graph.lineTo(292, zeroY); graph.stroke();
+            graph.setLineDash([]);
+          }
+          for (const series of chart.series) {
+            graph.strokeStyle = color(series.color);
+            graph.fillStyle = color(series.color);
+            graph.lineWidth = 2;
+            graph.beginPath();
+            let started = false;
+            history.forEach((item, index) => {
+              if (item[series.key] === null) { started = false; return; }
+              const x = history.length === 1 ? 12 : 12 + index * 280 / (history.length - 1);
+              const y = 108 - (item[series.key] - minValue) / range * 96;
+              if (started) graph.lineTo(x, y); else graph.moveTo(x, y);
+              started = true;
+            });
+            graph.stroke();
+            history.forEach((item, index) => {
+              if (item[series.key] === null) return;
+              const x = history.length === 1 ? 12 : 12 + index * 280 / (history.length - 1);
+              const y = 108 - (item[series.key] - minValue) / range * 96;
+              graph.beginPath(); graph.arc(x, y, 2.5, 0, Math.PI * 2); graph.fill();
+            });
+          }
+        }
+      }
+
+      function draw() {
+        resizeCanvas(canvas, ctx, width, height);
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = color("--cp-border");
+        for (let x = 24; x < width; x += 32) {
+          for (let y = 24; y < height; y += 32) {
+            ctx.beginPath(); ctx.arc(x, y, 1, 0, Math.PI * 2); ctx.fill();
+          }
+        }
+        ctx.fillStyle = color("--cp-highlight");
+        for (const zone of terrain.foodZones) {
+          ctx.beginPath(); ctx.arc(zone.x, zone.y, zone.r, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.fillStyle = color("--cp-border-strong");
+        for (const wall of terrain.walls) ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
+        for (const obstacle of terrain.obstacles) {
+          ctx.beginPath(); ctx.arc(obstacle.x, obstacle.y, obstacle.r, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.strokeStyle = color("--cp-success");
+        ctx.lineWidth = 3;
+        ctx.setLineDash([7, 5]);
+        for (const shelter of terrain.shelters) {
+          ctx.beginPath(); ctx.arc(shelter.x, shelter.y, shelter.r, 0, Math.PI * 2); ctx.stroke();
+        }
+        ctx.setLineDash([]);
+        ctx.fillStyle = color("--cp-link");
+        for (const piece of food) {
+          ctx.beginPath(); ctx.arc(piece.x, piece.y, 3.5, 0, Math.PI * 2); ctx.fill();
+        }
+        for (const bug of bugs) {
+          const size = bugRadius(bug);
+          ctx.save();
+          ctx.translate(bug.x, bug.y);
+          if (bug.id === selectedId) {
+            ctx.strokeStyle = color("--cp-accent");
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(0, 0, size + 6, 0, Math.PI * 2); ctx.stroke();
+          }
+          ctx.rotate(bug.angle);
+          ctx.strokeStyle = bugColor(bug.life / config.lifetime);
+          ctx.fillStyle = ctx.strokeStyle;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(0, -size * .6); ctx.lineTo(-size * .7, -size);
+          ctx.moveTo(0, size * .6); ctx.lineTo(-size * .7, size);
+          ctx.moveTo(size * .55, -size * .3); ctx.lineTo(size * 1.2, -size * .7);
+          ctx.moveTo(size * .55, size * .3); ctx.lineTo(size * 1.2, size * .7);
+          ctx.stroke();
+          ctx.beginPath(); ctx.ellipse(0, 0, size, size * .67, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
+        }
+        for (const predator of predators) {
+          ctx.save();
+          ctx.translate(predator.x, predator.y);
+          ctx.rotate(predator.angle);
+          ctx.fillStyle = color("--cp-text");
+          ctx.strokeStyle = color("--cp-danger");
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(14, 0); ctx.lineTo(-9, -10); ctx.lineTo(-4, 0); ctx.lineTo(-9, 10); ctx.closePath(); ctx.fill(); ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      function frame(timestamp) {
+        if (state === "running") {
+          if (lastTime !== null) {
+            accumulator += Math.min((timestamp - lastTime) / 1000, .1) * Number(document.getElementById("sim-speed").value);
+            while (accumulator >= step && state === "running") {
+              update(step);
+              accumulator -= step;
+            }
+          }
+          lastTime = timestamp;
+          updateUI();
+          draw();
+        } else {
+          lastTime = null;
+        }
+        requestAnimationFrame(frame);
+      }
+      pauseButton.addEventListener("click", () => {
+        if (state === "ended") return;
+        state = state === "running" ? "paused" : "running";
+        lastTime = null;
+        updateUI();
+      });
+      foodMode.addEventListener("change", updateRenewalControls);
+      settings.addEventListener("submit", (event) => { event.preventDefault(); newWorld(); });
+      document.getElementById("restart").addEventListener("click", () => { newWorld(true); });
+      document.getElementById("new-seed").addEventListener("click", () => { newWorld(true); });
+      document.getElementById("sprinkle").addEventListener("click", () => {
+        const added = addRandomFood(sprinkleAmount);
+        const notice = added === 0
+          ? "The habitat already has 300 food pieces."
+          : `Added ${added} food ${added === 1 ? "piece" : "pieces"}${food.length === foodLimit ? "; the habitat is now full" : ""}.`;
+        document.getElementById("sprinkle-status").textContent = state === "ended" ? `${notice} An ended world cannot be revived.` : notice;
+        updateUI();
+        draw();
+      });
+      clickMode.addEventListener("change", updateInteractionHint);
+      bugSelect.addEventListener("change", () => {
+        selectedId = bugSelect.value === "" ? null : Number(bugSelect.value);
+        updateUI();
+        draw();
+      });
+      canvas.addEventListener("click", (event) => {
+        const bounds = canvas.getBoundingClientRect();
+        const x = (event.clientX - bounds.left) * width / bounds.width;
+        const y = (event.clientY - bounds.top) * height / bounds.height;
+        if (clickMode.value === "food") {
+          if (food.length < foodLimit && !isBlocked(x, y, 5)) {
+            food.push({ x, y });
+            updateInteractionHint();
+          }
+          else document.getElementById("interaction-hint").textContent = food.length >= foodLimit ? "The habitat already has 300 food pieces." : "Choose an open area; food cannot be placed inside a wall or rock.";
+        } else {
+          let nearest = null;
+          let distance = 20;
+          for (const bug of bugs) {
+            const current = Math.hypot(bug.x - x, bug.y - y);
+            if (current < distance) { nearest = bug; distance = current; }
+          }
+          selectedId = nearest ? nearest.id : null;
+          bugSelect.value = selectedId === null ? "" : String(selectedId);
+        }
+        updateUI();
+        draw();
+      });
+      updateRenewalControls();
+      seedInput.value = generateSeed();
+      newWorld();
+      const redrawCanvases = () => { draw(); drawCharts(); };
+      const canvasObserver = new ResizeObserver(redrawCanvases);
+      canvasObserver.observe(canvas);
+      for (const id of ["survival", "speed", "food", "population", "generation", "selection"]) {
+        canvasObserver.observe(document.getElementById(`${id}-chart`));
+      }
+      window.addEventListener("resize", redrawCanvases);
+      requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>
